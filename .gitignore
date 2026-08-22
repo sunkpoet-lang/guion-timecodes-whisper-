@@ -1,0 +1,42 @@
+# Videos y guiones (material de trabajo personal, no debe subirse)
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.docx
+*.doc
+*.ass
+
+# Salidas generadas por el script y por la interfaz de Gradio
+salidas_gradio/
+salidas_conversion/
+*_respaldo_whisper.json
+*_RESULTADO.docx
+*_con_tc.docx
+guion_con_timecodes.docx
+*.srt
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+pytorch_env/
+*_env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Gradio
+gradio_cached_examples/
+flagged/
+
+# Respaldos personales (no deben subirse al repo)
+*.zip
+backup_funcional/
+
+# Sistema
+.DS_Store
+Thumbs.db
+registro.txt
