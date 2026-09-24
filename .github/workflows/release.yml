@@ -1,0 +1,124 @@
+# Compila la app para Windows, Mac y Linux y publica un release en GitHub.
+#
+# Para publicar una versión nueva:
+#   git tag v2.0.1
+#   git push origin v2.0.1
+# En unos 15 minutos aparece en la pestaña "Releases" con los tres descargables.
+#
+# También se puede correr a mano desde la pestaña "Actions" (Run workflow):
+# compila y deja los archivos como "artifacts" del run, sin publicar release.
+
+name: Compilar y publicar
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compilar:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            nombre: Windows
+          - os: macos-14
+            nombre: macOS
+          - os: ubuntu-22.04
+            nombre: Linux
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Versión
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="$(python -c 'from version import VERSION; print(VERSION)')-dev"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          python - <<EOF
+          import re
+          ruta = "version.py"
+          texto = open(ruta, encoding="utf-8").read()
+          texto = re.sub(r'VERSION = ".*"', 'VERSION = "$VERSION"', texto)
+          open(ruta, "w", encoding="utf-8").write(texto)
+          EOF
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Modelo incluido (base)
+        run: python empaquetado/descargar_modelo.py base modelos_incluidos/base
+
+      - name: PyInstaller
+        run: pyinstaller empaquetado/guion_timecodes.spec --noconfirm
+
+      - name: Instalador de Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=${{ steps.version.outputs.version }}" empaquetado\instalador.iss
+          Get-ChildItem dist\*.exe
+
+      - name: Comprimir (Mac)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/GuionTimecodes.app "dist/GuionTimecodes-${{ steps.version.outputs.version }}-macOS.zip"
+
+      - name: Comprimir (Linux)
+        if: runner.os == 'Linux'
+        run: tar -C dist -czf "dist/GuionTimecodes-${{ steps.version.outputs.version }}-Linux.tar.gz" GuionTimecodes
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GuionTimecodes-${{ matrix.nombre }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publicar:
+    needs: compilar
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: descargas
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: descargas/*
+          generate_release_notes: true
+          body: |
+            ## Descargar
+
+            | Sistema | Archivo |
+            |---|---|
+            | **Windows** | `GuionTimecodes-Setup-….exe`: instalador, doble clic y listo |
+            | Mac (Apple Silicon) | `GuionTimecodes-…-macOS.zip`: descomprimir y abrir con clic derecho → Abrir |
+            | Linux | `GuionTimecodes-…-Linux.tar.gz`: descomprimir y correr `GuionTimecodes/GuionTimecodes` |
+
+            Windows puede mostrar "Windows protegió su PC" porque el instalador no está firmado:
+            clic en **Más información → Ejecutar de todas formas**.
+
+            La primera vez, en **Modelos y equipo**, puedes activar la GPU (solo NVIDIA) y descargar
+            modelos más precisos. La app recomienda el mejor según tu equipo.

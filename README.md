@@ -1,309 +1,183 @@
-# Guion con time codes (Whisper + Word/SRT)
+# Guion con Time Codes (Whisper para doblaje)
 
-Dos herramientas web locales para producción de doblaje, usando
-[Whisper](https://github.com/openai/whisper) (vía `faster-whisper`):
+App de escritorio para producción de doblaje, con [Whisper](https://github.com/openai/whisper)
+(vía `faster-whisper`):
 
-- **Convertir libreto** — toma un libreto tradicional (números de escena, PERSONAJE/DIÁLOGO
-  en dos columnas), o subtítulos `.srt`/`.ass` ya existentes, y los pasa a una tabla Word de
-  3 columnas (TIME CODE, PERSONAJE, DIÁLOGO) — detecta el formato de entrada automáticamente.
-- **Guion con time codes — Whisper** — toma un video y, según el caso:
-  - **Ya tengo transcripción/traducción**: genera un Word con **TIME CODE | PERSONAJE |
-    DIÁLOGO**, calculando los tiempos reales a partir del video, sin modificar tu texto ni
-    las asignaciones. Pensado para guiones **traducidos** a otro idioma distinto al del audio.
-  - **Ya tengo un ASREC sin TIME CODE**: igual que arriba, pero para transcripciones en el
-    **mismo idioma** que el audio (as-recorded), sin traducción de por medio.
-  - **No tengo transcripción**: genera subtítulos `.srt` directo de lo que transcribe
-    Whisper, con los tiempos reales de inicio y fin — con opción de traducir a inglés
-    (útil para audio en japonés u otro idioma, sin traducción humana previa).
+- **Time codes**: toma el video de un episodio y, según el caso:
+  - **Tengo el guion traducido**: genera un Word con **TIME CODE | PERSONAJE | DIÁLOGO**
+    sin tocar tu texto ni las asignaciones. Para guiones traducidos a otro idioma que el del audio.
+  - **Tengo un ASREC sin time code**: igual, pero el guion está en el **mismo idioma** que el
+    audio; alinea comparando el texto, así que es más exacto.
+  - **No tengo guion**: genera subtítulos `.srt` directo de lo que escucha Whisper, con opción
+    de traducir a inglés.
+- **Convertir libreto**: pasa un libreto tradicional, un guion numerado o subtítulos `.srt`/`.ass`
+  a una tabla de 3 columnas, editable antes de exportar a Word.
+- **Modelos y equipo**: detecta tu procesador, RAM y tarjeta de video, recomienda el mejor modelo
+  de Whisper para tu equipo, descarga otros modelos y activa la GPU NVIDIA con un clic.
 
-Ambas corren como páginas web locales (Gradio) — no se necesita usar la línea de comandos
-para el uso diario. Detectan automáticamente tu GPU/CPU/RAM y sugieren el modelo de Whisper
-más adecuado para tu equipo.
+## Descargar
 
-## Requisitos
+Ve a **[Releases](https://github.com/sunkpoet-lang/guion-timecodes-whisper-/releases/latest)** y baja
+el archivo de tu sistema:
 
-- Python 3.9 o superior — el único paso que sí hay que instalar a mano (no se puede
-  automatizar desde un script que necesita ese mismo Python para correr).
-- Todo lo demás (entorno virtual, librerías, ffmpeg cuando es posible) lo instala el
-  script de configuración automática de abajo.
-- Opcional: GPU NVIDIA con CUDA para acelerar la transcripción (si no hay GPU compatible,
-  el script usa el procesador automáticamente).
+| Sistema | Archivo | Cómo se instala |
+|---|---|---|
+| **Windows 10/11** | `GuionTimecodes-Setup-X.Y.Z.exe` | Doble clic. No pide permisos de administrador. |
+| Mac (Apple Silicon) | `GuionTimecodes-X.Y.Z-macOS.zip` | Descomprimir, clic derecho en la app → **Abrir** (la primera vez). |
+| Linux | `GuionTimecodes-X.Y.Z-Linux.tar.gz` | Descomprimir y correr `GuionTimecodes/GuionTimecodes`. |
 
-## Instalación automática (recomendada)
+> Windows puede mostrar "Windows protegió su PC" porque el instalador no está firmado:
+> **Más información → Ejecutar de todas formas**.
 
-1. Instala Python desde [python.org/downloads](https://python.org/downloads) si no lo
-   tienes. **Windows:** marca la casilla "Add Python to PATH" durante la instalación.
+La app avisa en la barra lateral cuando hay una versión nueva.
 
-2. Clona o descarga este repositorio, y abre una terminal en esa carpeta.
+## Modelos y GPU
 
-3. Corre el script de configuración según tu sistema:
+La app trae el modelo **Base** incluido. En **Modelos y equipo** puedes descargar los demás
+desde sus páginas oficiales en Hugging Face:
 
-   **Windows:** doble clic en `setup.bat` (o `setup.bat` desde una terminal).
+| Modelo | Tamaño | Notas |
+|---|---|---|
+| Tiny | 75 MB | Solo para pruebas. |
+| Base | 141 MB | Incluido. |
+| Small | 464 MB | Buen equilibrio sin GPU. |
+| Medium | 1.4 GB | Preciso. |
+| Large v3 Turbo | 1.5 GB | Casi tan preciso como Large v3 y mucho más rápido. No traduce. |
+| Large v3 | 2.9 GB | El más preciso. Ideal con GPU. |
+| Distil Large v3.5 | 1.4 GB | Solo audio en inglés. |
 
-   **Mac/Linux:**
-   ```bash
-   chmod +x *.sh
-   ./setup.sh
-   ```
+La recomendación sale de la VRAM de tu GPU, o de los núcleos y la RAM si usas el procesador,
+con un tiempo estimado por episodio de 22 minutos. Si ya tenías modelos descargados por la
+versión anterior (caché de Hugging Face), la app los encuentra y no los vuelve a bajar.
 
-   Esto crea el entorno virtual, instala todas las dependencias de `requirements.txt`, y
-   verifica (e intenta instalar) ffmpeg automáticamente.
+**GPU NVIDIA:** el driver no trae las librerías que Whisper necesita (cuBLAS y cuDNN). Sin
+ellas, Whisper cae al procesador sin avisar. Con **Activar GPU**, la app las descarga una sola
+vez (~1.2 GB) desde los paquetes oficiales de NVIDIA en PyPI. Solo aplica a Windows y Linux;
+en Mac, Whisper usa el procesador.
 
-4. Para usar el proyecto de ahí en adelante, solo hace falta doble clic (Windows) o correr
-   el script (Mac/Linux) — no hay que volver a activar entornos ni instalar nada más:
+Todo lo descargado vive en la carpeta de datos del usuario y se conserva al actualizar:
 
-   | Herramienta | Windows | Mac/Linux |
-   |---|---|---|
-   | Convertir libreto | `iniciar_convertir_libreto.bat` | `./iniciar_convertir_libreto.sh` |
-   | Guion con time codes | `iniciar_time_codes.bat` | `./iniciar_time_codes.sh` |
+- Windows: `%LOCALAPPDATA%\GuionTimecodes`
+- Mac: `~/Library/Application Support/GuionTimecodes`
+- Linux: `~/.local/share/guion-timecodes`
 
-   Para tener **las dos páginas abiertas al mismo tiempo**, necesitas dos ventanas/terminales
-   separadas (una por herramienta) — Gradio les asigna puertos distintos automáticamente
-   (normalmente `http://127.0.0.1:7860` y `http://127.0.0.1:7861`; usa la dirección exacta
-   que muestre cada terminal). Si corres los dos comandos en la misma terminal uno tras otro,
-   el segundo va a fallar o a tomar el puerto que dejó libre el primero al cerrarse.
+## Formato del guion de entrada
 
-## Instalación manual (alternativa)
+- Una **tabla de Word** con columnas `PERSONAJE` (o `CHARACTER`) y `DIÁLOGO` (o `DIALOGUE`).
+  Es lo que produce **Convertir libreto**.
+- O **párrafos sueltos** con el formato `PERSONAJE: diálogo`.
 
-Si prefieres hacerlo paso a paso en vez de usar `setup.bat`/`setup.sh`:
+### Alineación proporcional vs. por texto
 
-1. Clona o descarga este repositorio.
+- **Proporcional**: no compara texto. Reparte las líneas del guion a lo largo del tiempo de habla
+  según la duración de cada una. Para guiones **traducidos**. Es una aproximación: revisa el resultado.
+- **Por texto**: compara cada línea con lo que transcribe Whisper. Solo sirve con guion y audio en el
+  **mismo idioma**. Las líneas sin coincidencia quedan marcadas `??:??:??,???` (o `????` en MMSS).
 
-2. Crea y activa un entorno virtual:
+### TIME CODE en MMSS
 
-   ```bash
-   python -m venv venv
-   ```
+Convención de doblaje: `0114` = 1 min 14 s. Solo cambia la columna del Word; el `.srt` siempre usa
+el formato completo.
 
-   Windows (PowerShell):
-   ```powershell
-   .\venv\Scripts\Activate.ps1
-   ```
-   Windows (CMD):
-   ```
-   venv\Scripts\activate.bat
-   ```
-   Mac/Linux:
-   ```bash
-   source venv/bin/activate
-   ```
+## Instalar desde el código (desarrollo)
 
-3. Instala las dependencias:
+Requiere Python 3.10 o superior.
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+git clone https://github.com/sunkpoet-lang/guion-timecodes-whisper-.git
+cd guion-timecodes-whisper-
+```
 
-4. Verifica que ffmpeg esté instalado:
+- **Windows:** doble clic en `setup.bat` y luego en `iniciar.bat`.
+- **Mac/Linux:** `./setup.sh` y luego `./iniciar.sh`. Si no se abre la ventana (en Linux hace falta
+  GTK o Qt para pywebview), la app se abre sola en el navegador; también puedes forzarlo con
+  `./iniciar.sh --navegador`.
 
-   ```bash
-   ffmpeg -version
-   ```
+### Compilar el ejecutable
 
-   Si no lo tienes: `winget install ffmpeg` (Windows), `brew install ffmpeg` (Mac),
-   `sudo apt install ffmpeg` (Linux).
+```bash
+pip install pyinstaller
+python empaquetado/descargar_modelo.py base modelos_incluidos/base
+pyinstaller empaquetado/guion_timecodes.spec --noconfirm
+```
 
-## Uso por línea de comandos
+Queda en `dist/GuionTimecodes/`. El instalador de Windows se arma con
+[Inno Setup](https://jrsoftware.org/isinfo.php): `iscc /DVersion=2.0.0 empaquetado\instalador.iss`.
 
-**Con guion existente** (genera Word):
+### Publicar una versión
+
+El flujo `.github/workflows/release.yml` compila Windows, Mac y Linux y publica el release:
+
+```bash
+git tag v2.0.1
+git push origin v2.0.1
+```
+
+También se puede correr a mano desde la pestaña **Actions** para probar la compilación sin publicar.
+
+## Línea de comandos
+
+**Con guion** (genera Word):
 ```bash
 python alinear_timecodes.py --video "video.mp4" --guion "guion.docx" --salida "guion_con_tc.docx"
 ```
 
-**Sin guion** (genera subtítulos `.srt` directo del video, con tiempos reales de Whisper):
+**Sin guion** (subtítulos `.srt` directo del video):
 ```bash
 python alinear_timecodes.py --video "video.mp4" --salida "subtitulos.srt"
 ```
-Si se omite `--guion`, el script entra automáticamente a este modo. Si `--salida` termina
-en `.docx` sin haber indicado `--guion`, el script avisa y cambia la extensión a `.srt` solo.
-
-### Parámetros
 
 | Parámetro | Descripción | Default |
 |---|---|---|
-| `--video` | Ruta al video o audio (mp4, mov, wav, etc.) | — (obligatorio) |
-| `--guion` | Ruta al `.docx` con el guion existente. Si se omite, genera subtítulos directos (ver arriba) | — (opcional) |
-| `--salida` | Ruta del archivo de salida (`.docx` con guion, `.srt` sin guion) | `guion_con_timecodes.docx` |
-| `--modelo` | Modelo de Whisper: `tiny`, `base`, `small`, `medium`, `large-v3` | `medium` |
-| `--idioma_audio` | Idioma real del AUDIO del video (no el del guion). Ej: `en`, `es`, `ja` | `es` |
-| `--modo` | `texto` o `proporcional` (ver más abajo). Solo aplica con `--guion` | `texto` |
-| `--continuar_desde` | Ruta a un `_respaldo_whisper.json` ya generado, para completar sin repetir la transcripción | — |
-| `--exportar_srt` | Con `--guion`: además del `.docx`, genera un `.srt` reutilizando esos timecodes | desactivado |
-| `--tarea` | `transcribir` o `traducir_a_ingles` (ver más abajo) | `transcribir` |
-| `--formato_tc` | `completo` (HH:MM:SS,mmm) o `mmss` (convención de doblaje: MMSS, ver más abajo) | `completo` |
+| `--video` | Video o audio (mp4, mov, wav…) | obligatorio |
+| `--guion` | `.docx` con el guion. Sin él, genera subtítulos directos | — |
+| `--salida` | Archivo de salida (`.docx` con guion, `.srt` sin guion) | `guion_con_timecodes.docx` |
+| `--modelo` | `tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo` o la carpeta de un modelo | `medium` |
+| `--idioma_audio` | Idioma del AUDIO (no del guion): `en`, `es`, `ja`… o `auto` | `es` |
+| `--modo` | `texto` o `proporcional` (solo con `--guion`) | `texto` |
+| `--dispositivo` | `auto` (GPU y si falla CPU), `cuda` o `cpu` | `auto` |
+| `--compute_type` | Precisión en GPU: `float16`, `int8` (GTX 10xx) o `float32` | `float16` |
+| `--continuar_desde` | `_respaldo_whisper.json` ya generado, para terminar sin transcribir de nuevo | — |
+| `--exportar_srt` | Con `--guion`: genera también un `.srt` con los mismos timecodes | desactivado |
+| `--tarea` | `transcribir` o `traducir_a_ingles` (solo traduce A inglés) | `transcribir` |
+| `--formato_tc` | `completo` (HH:MM:SS,mmm) o `mmss` | `completo` |
+| `--tc_fijo` | TIME CODE fijo por personaje, ej. `'TÍTULO=0:32;TÍTULO EPISÓDICO=0:34'` | — |
 
-### Traducir a inglés (`--tarea traducir_a_ingles`)
-
-Whisper puede traducir directo al inglés mientras transcribe — útil para generar subtítulos
-en inglés a partir de audio en japonés u otro idioma, sin necesitar una traducción humana
-previa. **Limitación del modelo: solo traduce A INGLÉS**, no hay opción de traducir directo
-a español ni a ningún otro idioma. Para llegar a español desde japonés sin traducción
-humana, el camino sería japonés → inglés (con esta opción) → español (con un traductor
-aparte) — normalmente da mejor resultado que intentar japonés → español directo. Aplica
-sobre todo al modo sin guion (subtítulos directos); revisión humana recomendada después,
-especialmente para juegos de palabras, honoríficos o referencias culturales.
-
-### Formato del TIME CODE (`--formato_tc`)
-
-- **`completo`** (default): `HH:MM:SS,mmm`, con precisión de milisegundos.
-- **`mmss`**: convención de doblaje, `MMSS` sin separadores ni milisegundos (ej. `0114` =
-  1 min 14 s). Solo cambia cómo se ve la columna del Word — el `.srt` generado con
-  `--exportar_srt` siempre usa el formato completo, ya que lo necesita para funcionar en
-  reproductores de video. Las líneas sin timecode confiable se marcan `????` en este modo.
-
-### Modo `texto` vs `proporcional`
-
-- **`texto`**: compara el texto del guion contra lo que transcribe Whisper. Úsalo cuando
-  el guion está en el **mismo idioma** que el audio del video.
-- **`proporcional`**: no compara texto, reparte las líneas del guion a lo largo del tiempo
-  de habla detectado por Whisper, según la duración de cada línea. Úsalo cuando el guion
-  está **traducido a un idioma distinto** al del audio (por ejemplo, audio en inglés y
-  guion en español) — comparar texto no funciona entre idiomas distintos. Es una
-  aproximación: revisa el resultado con más cuidado que en modo `texto`.
-
-### Formato del guion de entrada
-
-El script detecta automáticamente:
-- Una **tabla de Word** con columnas cuyo encabezado contenga `PERSONAJE` (o `CHARACTER`)
-  y `DIALOGO`/`DIÁLOGO` (o `DIALOGUE`).
-- **Párrafos sueltos** con el formato `PERSONAJE: diálogo`.
-
-### Subtítulos (.srt)
-
-Hay dos formas de obtener un `.srt`, con distinta precisión:
-
-- **Sin guion** (modo directo): usa los tiempos reales de inicio y fin que detecta
-  Whisper para cada frase. Más preciso, pero el texto es literal (sin traducir, sin
-  personaje asignado).
-- **Con guion + `--exportar_srt`**: reutiliza los timecodes ya calculados al alinear tu
-  guion. Cada línea dura hasta que empieza la siguiente línea con timecode confiable (con
-  un pequeño margen), acotado entre 1.2 y 6 segundos. Las líneas sin timecode confiable
-  (`??:??:??,???`) se omiten. Es una aproximación razonable para revisar sincronía, no un
-  subtitulado frame-perfect para entrega final.
-
-## Convertir libreto (formato tradicional / .srt / .ass → 3 columnas)
-
-```bash
-python convertir_libreto_app.py
-```
-
-Detecta automáticamente el formato de lo que pegues o subas:
-
-- **Libreto tradicional**: bloques de escena numerados (`1 (10:00:02:00)`) seguidos de
-  líneas `PERSONAJE` + `DIÁLOGO` alineadas en dos columnas (por tabulador o por espacios).
-  Ignora el encabezado (título, número de episodio) y las marcas de escena automáticamente.
-  TIME CODE queda **vacío** — se calcula después con "Guion con time codes".
-- **Subtítulos `.srt` o `.ass` ya existentes**: TIME CODE se llena con el tiempo **real**
-  del archivo, PERSONAJE queda **vacío** para asignarlo a mano viendo el video — evita
-  copiar bloques de texto y recalcular timecodes, ahorrando tiempo y evitando errores de
-  continuidad. Limpia automáticamente etiquetas de formato (`<i>`, `{\...}`, saltos `\N`).
-
-En los tres casos, el resultado se muestra en una **tabla editable** antes de exportar —
-las líneas que no se pudieron separar (solo en libreto tradicional) quedan marcadas con
-`?` en PERSONAJE. Exporta un `.docx` de 3 columnas, listo para usarse como `--guion` (o
-subido en "Guion con time codes") en el siguiente paso. Incluye la misma opción de formato
-MM:SS para el TIME CODE que la otra herramienta (solo tiene efecto si viene de `.srt`/`.ass`).
-
-También se puede usar por línea de comandos:
+Convertir libreto sin la app:
 ```bash
 python convertir_libreto.py --entrada libreto.txt --salida guion_3_columnas.docx
 python convertir_libreto.py --entrada subtitulos.srt --salida guion_3_columnas.docx --formato_tc mmss
-python convertir_libreto.py --entrada fansub.ass --salida guion_3_columnas.docx
 ```
 
-## Uso con la interfaz web (Gradio) — Guion con time codes — Whisper
+## Problema conocido: cierre justo después de transcribir
 
-```bash
-python gradio_app.py
-```
-
-Se abre automáticamente en el navegador (normalmente `http://127.0.0.1:7860`).
-
-Al abrirla, incluye un panel de "Cómo usar esta página" y otro con el formato exacto de
-guion que necesitas subir. Debajo, un selector con 3 opciones:
-
-- **"Ya tengo transcripción/traducción"** → para guiones **traducidos** a un idioma
-  distinto al del audio. Preselecciona el modo de alineación "Proporcional".
-- **"Ya tengo un ASREC sin TIME CODE"** → para transcripciones en el **mismo idioma** que
-  el audio (as-recorded, sin traducir). Preselecciona el modo de alineación "Texto".
-  Ambas opciones muestran los mismos campos (video + guion en Word), solo cambia el modo
-  de alineación preseleccionado — sigue siendo editable en cualquiera de los dos casos.
-- **"No tengo transcripción"** → solo sube el video, genera subtítulos `.srt` directo (los
-  campos de guion y modo de alineación se ocultan solos, ya que no aplican). Incluye la
-  opción de tarea "Traducir a inglés" para audio en idiomas distintos al inglés.
-
-La página detecta automáticamente tu **GPU (NVIDIA vía `nvidia-smi`), CPU y RAM** (con
-comandos nativos del sistema operativo, sin necesitar instalar nada extra) y sugiere el
-modelo de Whisper más adecuado para tu equipo — si detecta una GPU de otra marca (AMD/Intel)
-te avisa que Whisper solo acelera con NVIDIA y por qué va a usar CPU en ese caso.
-
-El nombre del archivo de salida se autocompleta con el nombre del video en cuanto lo subes
-(por ejemplo, `SFOOT_101.mov` sugiere `SFOOT_101.docx` o `SFOOT_101.srt` según el modo) —
-sigue siendo editable si quieres cambiarlo. Los resultados se identifican con insignias de
-color (📄 WORD / 💬 SUBS) para no confundirlos a simple vista. Al final de la página hay un
-ejemplo ilustrativo de cómo se ve el Word resultante.
-
-Para compartirla con otras personas en tu misma red, cambia al final de `gradio_app.py`:
-```python
-demo.launch(share=True)
-```
-Esto genera un link temporal accesible desde fuera de tu red — solo actívalo cuando lo
-necesites, ya que expone tu equipo mientras el link esté activo.
-
-> **Nota:** por ahora está pensado para un solo usuario a la vez por instancia (usa la GPU
-> o CPU de la máquina donde corre). Si varias personas lo usan al mismo tiempo desde la
-> misma máquina, competirán por los mismos recursos.
-
-## Notas sobre GPU
-
-El script intenta usar GPU (CUDA) automáticamente y cae a CPU si no está disponible. Si
-tienes GPU NVIDIA pero ves errores de `cublas`/`cudnn` al transcribir, instala:
-
-```bash
-pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
-```
-
-### Problema conocido: cierre inesperado justo después de transcribir
-
-En algunos equipos con Windows, el proceso puede cerrarse solo justo al terminar de
-transcribir (antes de guardar el Word), por un problema de compatibilidad entre ciertos
-drivers de GPU y la limpieza de memoria. **No se pierde el trabajo hecho**: el script
-guarda un respaldo (`*_respaldo_whisper.json`) con los timecodes conforme los va
-detectando. Si esto pasa, corre de nuevo el mismo comando agregando:
-
-```bash
---continuar_desde "nombre_de_salida_respaldo_whisper.json"
-```
-
-Esto genera el resultado usando el respaldo, sin volver a usar la GPU. La interfaz de
-Gradio ya maneja esto automáticamente. Compatible también con respaldos generados por
-versiones anteriores del script (antes de que se guardara también el tiempo de fin de
-cada línea) — a esos les calcula un fin aproximado.
+En algunos equipos con Windows, el proceso de Whisper se cierra solo al terminar de transcribir,
+por un problema entre ciertos drivers de GPU y la limpieza de memoria. **No se pierde el trabajo**:
+Whisper corre en un proceso aparte que guarda un respaldo mientras avanza, y la app termina
+el documento desde ese respaldo automáticamente. Por línea de comandos, agrega
+`--continuar_desde "salida_respaldo_whisper.json"`.
 
 ## Solución de problemas
 
 | Problema | Solución |
 |---|---|
-| `python no se reconoce como un comando` | Python no quedó en el PATH. Reinstala marcando "Add Python to PATH". |
-| `ModuleNotFoundError` | El entorno virtual no está activado, o falta instalar. Verifica el prompt y corre `pip install -r requirements.txt` de nuevo. |
-| `RuntimeError: Library cublas64_12.dll is not found` | Instala `nvidia-cublas-cu12 nvidia-cudnn-cu12` (ver arriba). |
-| El programa se cierra solo tras "Transcribiendo: 100%" | Ver "Problema conocido" arriba — usa `--continuar_desde`. |
-| Muchas líneas quedan marcadas con `??:??:??,???` (modo texto) | El audio tiene mucho ruido/música, o el guion difiere bastante del audio real. |
-| El Word muestra una versión vieja al abrirlo | Word no se actualiza solo si el archivo cambia en disco mientras está abierto. Ciérralo sin guardar y vuelve a abrirlo. |
-| `ValueError: The truth value of a DataFrame is ambiguous` en Convertir libreto | Ya corregido en la versión actual — usa `len(tabla) == 0` en vez de `not tabla`, ya que Gradio a veces entrega la tabla como DataFrame de pandas incluso con `type="array"`. |
-| Los paneles de texto (pasos, requisitos, detección de hardware) se ven en blanco/invisibles | El tema oscuro de Gradio aplica `color` con `!important` a elementos como `<span>`/`<b>`, ganándole a estilos heredados del contenedor padre. La solución es poner `color:...!important` en **cada elemento de texto individualmente**, no solo en el `<div>` contenedor — ya corregido en la versión actual. |
-| Dos páginas no abren juntas / una no carga | Necesitan **dos terminales separadas**, una por herramienta. Correr ambos comandos en la misma terminal hace que el segundo falle o tome el puerto que dejó libre el primero. |
+| "La GPU falló y Whisper siguió en el procesador" | Ve a **Modelos y equipo**. Si dice "GPU sin activar", usa **Activar GPU**. Si ya está activa, prueba un modelo más chico (puede faltar VRAM). |
+| La ventana no abre y la app aparece en el navegador | En Windows falta el runtime WebView2 (viene con Edge): instálalo desde Microsoft. En Linux falta GTK/Qt. La app funciona igual en el navegador. |
+| Muchas líneas `??:??:??,???` (alineación por texto) | El audio tiene mucha música o ruido, o el guion difiere del audio. Prueba la alineación proporcional. |
+| El Word muestra una versión vieja | Word no recarga un archivo abierto que cambió en disco. Ciérralo y vuelve a abrirlo. |
 
 ## Estructura del proyecto
 
 ```
-alinear_timecodes.py          # Lógica principal (Whisper + alineación + generación de Word/SRT)
-gradio_app.py                  # Interfaz web de "Guion con time codes — Whisper"
-convertir_libreto.py           # Lógica de conversión (libreto tradicional / .srt / .ass → 3 columnas)
-convertir_libreto_app.py       # Interfaz web de "Convertir libreto"
-requirements.txt               # Dependencias
-.gitignore                     # Excluye videos, guiones, resultados y respaldos personales
-setup.bat / setup.sh           # Instalación automática (entorno + dependencias + ffmpeg)
-iniciar_time_codes.bat/.sh     # Lanzador de "Guion con time codes — Whisper"
-iniciar_convertir_libreto.bat/.sh  # Lanzador de "Convertir libreto"
+app.py                   # Punto de entrada: ventana de escritorio (pywebview) o navegador
+servidor.py              # API local (FastAPI) que usa la interfaz
+web/                     # Interfaz: index.html, estilos.css, app.js, iconos.js
+alinear_timecodes.py     # Whisper + alineación + Word/SRT (también se usa por línea de comandos)
+convertir_libreto.py     # Libreto tradicional / guion numerado / .srt / .ass → 3 columnas
+hardware.py              # Detección de CPU, RAM y GPU
+modelos.py               # Catálogo, descarga y recomendación de modelos
+cuda_runtime.py          # Descarga de cuBLAS/cuDNN para la GPU
+rutas.py, version.py     # Carpetas de datos y versión de la app
+empaquetado/             # PyInstaller, Inno Setup, ícono y descarga del modelo incluido
+.github/workflows/       # Compilación y publicación automática de releases
 ```

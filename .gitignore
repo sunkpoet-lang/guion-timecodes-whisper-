@@ -16,6 +16,11 @@ salidas_conversion/
 guion_con_timecodes.docx
 *.srt
 
+# Compilación del ejecutable
+build/
+dist/
+modelos_incluidos/
+
 # Entornos virtuales
 venv/
 env/

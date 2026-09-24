@@ -1,9 +1,13 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 echo ============================================
-echo   Configuracion automatica del proyecto
+echo   Guion con Time Codes - instalacion desde el codigo
 echo ============================================
+echo.
+echo Si solo quieres usar la app, es mas facil descargar el instalador:
+echo https://github.com/sunkpoet-lang/guion-timecodes-whisper-/releases
 echo.
 
 where python >nul 2>nul
@@ -16,18 +20,18 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo [1/4] Python encontrado.
+echo [1/3] Python encontrado.
 echo.
 
 if not exist venv (
-    echo [2/4] Creando entorno virtual...
+    echo [2/3] Creando entorno virtual...
     python -m venv venv
 ) else (
-    echo [2/4] El entorno virtual ya existe, se omite este paso.
+    echo [2/3] El entorno virtual ya existe, se omite este paso.
 )
 echo.
 
-echo [3/4] Instalando dependencias (puede tardar varios minutos la primera vez)...
+echo [3/3] Instalando dependencias (puede tardar varios minutos la primera vez)...
 call venv\Scripts\activate.bat
 python -m pip install --upgrade pip >nul
 pip install -r requirements.txt
@@ -38,28 +42,14 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-
-where ffmpeg >nul 2>nul
-if errorlevel 1 (
-    echo [4/4] ffmpeg no encontrado. Intentando instalar con winget...
-    winget install ffmpeg --accept-source-agreements --accept-package-agreements
-    echo.
-    echo Si la instalacion de winget fallo, instala ffmpeg manualmente desde:
-    echo https://ffmpeg.org/download.html
-) else (
-    echo [4/4] ffmpeg ya esta instalado.
-)
+echo Descargando el modelo "base" de Whisper...
+python empaquetado\descargar_modelo.py base modelos_incluidos\base
 
 echo.
 echo ============================================
-echo   Listo! Para usar el proyecto:
+echo   Listo! Para abrir la app: doble clic en iniciar.bat
 echo.
-echo   1. Doble clic en iniciar_time_codes.bat
-echo      (genera Time Codes con Whisper a partir de un video)
-echo.
-echo   2. Doble clic en iniciar_convertir_libreto.bat
-echo      (convierte un libreto tradicional a 3 columnas)
-echo.
-echo   Puedes tener ambas ventanas abiertas al mismo tiempo.
+echo   La GPU (NVIDIA) y los modelos mas precisos se
+echo   activan desde la app, en "Modelos y equipo".
 echo ============================================
 pause

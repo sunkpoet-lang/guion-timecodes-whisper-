@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guion con Time Codes</title>
+  <link rel="icon" href="/web/icono.png">
+  <link rel="stylesheet" href="/web/estilos.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="lateral">
+      <div class="marca">
+        <div class="marca-logo" data-icono="onda" data-tam="19"></div>
+        <div class="marca-texto">
+          <div class="marca-nombre">Guion con Time Codes</div>
+          <div class="marca-sub">Whisper para doblaje</div>
+        </div>
+      </div>
+
+      <button class="nav-item activo" data-vista="timecodes"><i data-icono="reloj"></i><span>Time codes</span></button>
+      <button class="nav-item" data-vista="libreto"><i data-icono="tabla"></i><span>Convertir libreto</span></button>
+      <button class="nav-item" data-vista="modelos"><i data-icono="chip"></i><span>Modelos y equipo</span><em class="contador" id="nav-modelos"></em></button>
+
+      <div class="lateral-pie">
+        <button class="actualizacion" id="actualizacion" hidden><i data-icono="descarga"></i><span></span></button>
+        <button class="equipo" id="equipo-mini" data-ir="modelos"></button>
+        <div class="version"><span id="version"></span><span id="modo-app"></span></div>
+      </div>
+    </aside>
+
+    <main class="principal" id="principal">
+      <div class="cargando-app"><i data-icono="cargando" class="giro"></i>Detectando tu equipo…</div>
+    </main>
+  </div>
+
+  <div class="notificacion" id="notificacion"></div>
+
+  <script src="/web/iconos.js"></script>
+  <script src="/web/app.js"></script>
+</body>
+</html>

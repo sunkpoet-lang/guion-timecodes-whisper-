@@ -81,6 +81,7 @@ tabla con esas columnas, intenta la Opción B.
 """
 
 import argparse
+import os
 import re
 import difflib
 import sys
@@ -213,23 +214,26 @@ def leer_guion(ruta_docx: str):
     return filas
 
 
-def cargar_modelo_whisper(modelo: str):
+def cargar_modelo_whisper(modelo: str, dispositivo: str = "auto", compute_type: str = "float16"):
     """
     Intenta cargar el modelo en GPU (CUDA) primero, ya que es mucho más rápido.
     Si no hay GPU disponible o falta CUDA/cuDNN, cae automáticamente a CPU.
+    dispositivo="cpu" salta directo a CPU (por ejemplo, en Mac o sin GPU NVIDIA).
     """
     from faster_whisper import WhisperModel
 
-    try:
-        print(f"Cargando modelo Whisper '{modelo}' en GPU (CUDA)...")
-        model = WhisperModel(modelo, device="cuda", compute_type="float16")
-        print("GPU detectada correctamente. Usando aceleración CUDA.")
-        return model
-    except Exception as e:
-        print(f"No se pudo usar la GPU ({e}).")
-        print("Cambiando a CPU (será más lento, prueba un modelo más chico si tarda mucho).")
-        model = WhisperModel(modelo, device="cpu", compute_type="int8")
-        return model
+    if dispositivo != "cpu":
+        try:
+            print(f"Cargando modelo Whisper en GPU (CUDA, {compute_type})...")
+            model = WhisperModel(modelo, device="cuda", compute_type=compute_type)
+            print("GPU detectada correctamente. Usando aceleración CUDA.")
+            return model
+        except Exception as e:
+            print(f"No se pudo usar la GPU ({e}).")
+            print("AVISO_CPU: Cambiando a CPU (será más lento, prueba un modelo más chico si tarda mucho).")
+
+    print("Cargando modelo Whisper en CPU...")
+    return WhisperModel(modelo, device="cpu", compute_type="int8")
 
 
 def _transcribir_con_barra(model, ruta_media: str, idioma_audio: str, archivo_respaldo: str = None, tarea: str = "transcribe"):
@@ -245,7 +249,10 @@ def _transcribir_con_barra(model, ruta_media: str, idioma_audio: str, archivo_re
     """
     import json
 
-    segments, info = model.transcribe(ruta_media, language=idioma_audio, task=tarea)
+    idioma = None if idioma_audio == "auto" else idioma_audio  # None = Whisper lo detecta solo
+    segments, info = model.transcribe(ruta_media, language=idioma, task=tarea)
+    if idioma is None:
+        print(f"Idioma detectado: {info.language} ({info.language_probability:.0%})")
     duracion_total = round(info.duration, 1) if info.duration else None
 
     resultado = []
@@ -267,7 +274,8 @@ def _transcribir_con_barra(model, ruta_media: str, idioma_audio: str, archivo_re
     return resultado
 
 
-def transcribir_con_whisper(ruta_media: str, modelo: str, idioma_audio: str, archivo_respaldo: str = None, tarea: str = "transcribe"):
+def transcribir_con_whisper(ruta_media: str, modelo: str, idioma_audio: str, archivo_respaldo: str = None,
+                            tarea: str = "transcribe", dispositivo: str = "auto", compute_type: str = "float16"):
     """
     Transcribe (o traduce a inglés, si tarea="translate") el video/audio con Whisper
     y devuelve [(inicio_segundos, fin_segundos, texto), ...].
@@ -278,8 +286,11 @@ def transcribir_con_whisper(ruta_media: str, modelo: str, idioma_audio: str, arc
     """
     from faster_whisper import WhisperModel
 
-    print(f"Cargando modelo Whisper '{modelo}' (la primera vez lo descarga, puede tardar)...")
-    model = cargar_modelo_whisper(modelo)
+    if os.path.isdir(modelo):
+        print("Cargando modelo Whisper...")
+    else:
+        print(f"Cargando modelo Whisper '{modelo}' (la primera vez lo descarga, puede tardar)...")
+    model = cargar_modelo_whisper(modelo, dispositivo, compute_type)
 
     accion = "Traduciendo a inglés" if tarea == "translate" else "Transcribiendo"
     print(f"{accion} (idioma de audio: {idioma_audio})...")
@@ -287,7 +298,7 @@ def transcribir_con_whisper(ruta_media: str, modelo: str, idioma_audio: str, arc
         return _transcribir_con_barra(model, ruta_media, idioma_audio, archivo_respaldo, tarea)
     except RuntimeError as e:
         print(f"\nLa GPU falló durante la transcripción ({e}).")
-        print("Reintentando en CPU (será más lento, pero no se pierde el progreso)...")
+        print("AVISO_CPU: Reintentando en CPU (será más lento, pero no se pierde el progreso)...")
         model_cpu = WhisperModel(modelo, device="cpu", compute_type="int8")
         return _transcribir_con_barra(model_cpu, ruta_media, idioma_audio, archivo_respaldo, tarea)
 
@@ -521,7 +532,13 @@ def main():
                               "Si se omite, genera subtítulos directos de lo que transcribe Whisper "
                               "(sin personaje ni traducción), usando --salida terminado en .srt")
     parser.add_argument("--salida", default="guion_con_timecodes.docx", help="Ruta del .docx de salida")
-    parser.add_argument("--modelo", default="medium", help="Modelo Whisper: tiny, base, small, medium, large-v3")
+    parser.add_argument("--modelo", default="medium",
+                         help="Modelo Whisper: tiny, base, small, medium, large-v3, large-v3-turbo, "
+                              "o la ruta a una carpeta con un modelo ya descargado")
+    parser.add_argument("--dispositivo", default="auto", choices=["auto", "cuda", "cpu"],
+                         help="'auto' intenta GPU y cae a CPU si falla; 'cpu' no intenta la GPU")
+    parser.add_argument("--compute_type", default="float16",
+                         help="Precisión en GPU: float16 (default), int8 (GPUs GTX 10xx) o float32")
     parser.add_argument("--idioma_audio", default="es", help="Idioma real del AUDIO del video (no del guion). Ej: en, es, fr")
     parser.add_argument("--modo", default="texto", choices=["texto", "proporcional"],
                          help="'texto' si guion y audio están en el mismo idioma; 'proporcional' si el guion está traducido a otro idioma")
@@ -564,7 +581,8 @@ def main():
         else:
             segmentos = transcribir_con_whisper(
                 args.video, modelo=args.modelo, idioma_audio=args.idioma_audio,
-                archivo_respaldo=respaldo, tarea=tarea_whisper
+                archivo_respaldo=respaldo, tarea=tarea_whisper,
+                dispositivo=args.dispositivo, compute_type=args.compute_type,
             )
 
         cantidad = generar_srt_directo(segmentos, ruta_srt)
@@ -585,7 +603,8 @@ def main():
     else:
         segmentos = transcribir_con_whisper(
             args.video, modelo=args.modelo, idioma_audio=args.idioma_audio,
-            archivo_respaldo=respaldo, tarea=tarea_whisper
+            archivo_respaldo=respaldo, tarea=tarea_whisper,
+            dispositivo=args.dispositivo, compute_type=args.compute_type,
         )
 
     print(f"Whisper generó {len(segmentos)} segmentos con timecode.")
