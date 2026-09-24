@@ -10,8 +10,13 @@ App de escritorio para producción de doblaje, con [Whisper](https://github.com/
     audio; alinea comparando el texto, así que es más exacto.
   - **No tengo guion**: genera subtítulos `.srt` directo de lo que escucha Whisper, con opción
     de traducir a inglés.
-- **Convertir libreto**: pasa un libreto tradicional, un guion numerado o subtítulos `.srt`/`.ass`
-  a una tabla de 3 columnas, editable antes de exportar a Word.
+- **Convertir libreto**: pasa a una tabla de 3 columnas (T.C. | PERSONAJE | DIÁLOGO), editable
+  antes de exportar a **Word o Excel**. Basta con arrastrar el archivo a la ventana; se convierte solo:
+  - libreto tradicional, guion numerado tipo screenplay o guion *as broadcast* (`PERSONAJE: diálogo`);
+  - Word hecho con estilos de guion (`Personnage` / `Dialogue` / `Parenthèse`, como los ASREC de Foot 2 Rue);
+  - Word que ya trae una tabla (como los ASR de CaptionMax: `# | Timecode | Character | Dialogue`):
+    se toman solo esas tres columnas y se descarta la numeración `#`;
+  - subtítulos `.srt` / `.ass` (el T.C. sale del archivo y PERSONAJE queda vacío para asignarlo).
 - **Modelos y equipo**: detecta tu procesador, RAM y tarjeta de video, recomienda el mejor modelo
   de Whisper para tu equipo, descarga otros modelos y activa la GPU NVIDIA con un clic.
 
@@ -65,7 +70,10 @@ Todo lo descargado vive en la carpeta de datos del usuario y se conserva al actu
 
 - Una **tabla de Word** con columnas `PERSONAJE` (o `CHARACTER`) y `DIÁLOGO` (o `DIALOGUE`).
   Es lo que produce **Convertir libreto**.
+- Un Word hecho con **estilos de guion** (`Personnage` / `Dialogue`…), como los ASREC.
 - O **párrafos sueltos** con el formato `PERSONAJE: diálogo`.
+
+Opcionalmente, además del Word, genera el mismo resultado en **Excel** y en subtítulos `.srt`.
 
 ### Alineación proporcional vs. por texto
 
@@ -139,6 +147,7 @@ python alinear_timecodes.py --video "video.mp4" --salida "subtitulos.srt"
 | `--compute_type` | Precisión en GPU: `float16`, `int8` (GTX 10xx) o `float32` | `float16` |
 | `--continuar_desde` | `_respaldo_whisper.json` ya generado, para terminar sin transcribir de nuevo | — |
 | `--exportar_srt` | Con `--guion`: genera también un `.srt` con los mismos timecodes | desactivado |
+| `--exportar_xlsx` | Con `--guion`: genera también un Excel con las mismas 3 columnas | desactivado |
 | `--tarea` | `transcribir` o `traducir_a_ingles` (solo traduce A inglés) | `transcribir` |
 | `--formato_tc` | `completo` (HH:MM:SS,mmm) o `mmss` | `completo` |
 | `--tc_fijo` | TIME CODE fijo por personaje, ej. `'TÍTULO=0:32;TÍTULO EPISÓDICO=0:34'` | — |
@@ -147,6 +156,7 @@ Convertir libreto sin la app:
 ```bash
 python convertir_libreto.py --entrada libreto.txt --salida guion_3_columnas.docx
 python convertir_libreto.py --entrada subtitulos.srt --salida guion_3_columnas.docx --formato_tc mmss
+python convertir_libreto.py --entrada Saltix_23_ASR.docx --salida guion_3_columnas.xlsx
 ```
 
 ## Problema conocido: cierre justo después de transcribir

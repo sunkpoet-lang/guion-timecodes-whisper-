@@ -200,6 +200,12 @@ def leer_guion(ruta_docx: str):
     if filas:
         return filas
 
+    # --- Guiones con estilos de Word (Personnage / Dialogue…), como los ASREC ---
+    from convertir_libreto import leer_guion_con_estilos
+    filas = [(f["personaje"], f["dialogo"]) for f in leer_guion_con_estilos(doc)]
+    if filas:
+        return filas
+
     # --- Opción B: párrafos "PERSONAJE: diálogo" ---
     patron = re.compile(r"^([A-ZÁÉÍÓÚÑÜ0-9 ,._-]{1,30}):\s*(.+)$")
     for p in doc.paragraphs:
@@ -471,7 +477,7 @@ def generar_docx(filas, ruta_salida: str, formato_tc: str = "completo"):
     tabla = doc.add_table(rows=1, cols=3)
     tabla.style = "Table Grid"
     encabezados = tabla.rows[0].cells
-    encabezados[0].text = "TIME CODE"
+    encabezados[0].text = "T.C."
     encabezados[1].text = "PERSONAJE"
     encabezados[2].text = "DIÁLOGO"
     for celda in encabezados:
@@ -547,6 +553,8 @@ def main():
                               "transcribir con Whisper (ahorra tiempo/GPU): usa esos timecodes directamente.")
     parser.add_argument("--exportar_srt", action="store_true",
                          help="Además del .docx, genera un archivo .srt (subtítulos) con el mismo nombre.")
+    parser.add_argument("--exportar_xlsx", action="store_true",
+                         help="Además del .docx, genera un Excel (.xlsx) con las mismas 3 columnas.")
     parser.add_argument("--formato_tc", default="completo", choices=["completo", "mmss"],
                          help="Formato del TIME CODE en el Word: 'completo' (HH:MM:SS,mmm, default) o "
                               "'mmss' (convención de doblaje: MMSS, sin separadores ni milisegundos). "
@@ -622,6 +630,16 @@ def main():
             print(f"TC fijo aplicado a: {', '.join(tc_fijo_dict.keys())}")
 
     generar_docx(filas_finales, args.salida, formato_tc=args.formato_tc)
+
+    if args.exportar_xlsx:
+        from convertir_libreto import generar_xlsx_3_columnas
+        ruta_xlsx = args.salida.rsplit(".", 1)[0] + ".xlsx"
+        # El MMSS se convierte aquí para que las líneas sin timecode queden "????", igual que en el Word
+        generar_xlsx_3_columnas([
+            {"timecode": formatear_mmss(tc) if args.formato_tc == "mmss" else tc, "personaje": p, "dialogo": d}
+            for tc, p, d in filas_finales
+        ], ruta_xlsx)
+        print(f"Excel generado: {ruta_xlsx}")
 
     if args.exportar_srt:
         ruta_srt = args.salida.rsplit(".", 1)[0] + ".srt"

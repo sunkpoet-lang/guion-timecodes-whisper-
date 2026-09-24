@@ -38,7 +38,7 @@ from pydantic import BaseModel
 import cuda_runtime
 import hardware
 import modelos
-from convertir_libreto import detectar_y_parsear, generar_docx_3_columnas
+from convertir_libreto import detectar_y_parsear, generar_docx_3_columnas, generar_xlsx_3_columnas, leer_archivo
 from rutas import CARPETA_APP, CARPETA_SALIDAS, CARPETA_SUBIDAS, CARPETA_WEB, EMPAQUETADO
 from version import REPO_GITHUB, VERSION
 
@@ -267,6 +267,7 @@ class PedidoTrabajo(BaseModel):
     modelo: str
     tarea: str = "transcribir"
     exportar_srt: bool = False
+    exportar_xlsx: bool = False
     formato_mmss: bool = False
     nombre_salida: str = ""
     carpeta_salida: str | None = None
@@ -364,6 +365,8 @@ def _ejecutar(trabajo, pedido: PedidoTrabajo):
                      "--formato_tc", "mmss" if pedido.formato_mmss else "completo"]
             if pedido.exportar_srt:
                 args.append("--exportar_srt")
+            if pedido.exportar_xlsx:
+                args.append("--exportar_xlsx")
         else:
             args += ["--tarea", pedido.tarea]
 
@@ -386,7 +389,8 @@ def _ejecutar(trabajo, pedido: PedidoTrabajo):
             raise RuntimeError(ultima or "No se pudo generar el archivo. Revisa el registro para más detalles.")
 
         resultados = []
-        for tmp in [salida_tmp] + ([salida_tmp.rsplit(".", 1)[0] + ".srt"] if con_guion else []):
+        extras = [salida_tmp.rsplit(".", 1)[0] + ext for ext in (".xlsx", ".srt")] if con_guion else []
+        for tmp in [salida_tmp] + extras:
             if os.path.exists(tmp):
                 final = _ruta_libre(destino, os.path.basename(tmp))
                 shutil.move(tmp, final)
@@ -450,18 +454,15 @@ class PedidoConvertir(BaseModel):
 
 @app.post("/api/libreto/convertir", dependencies=[api])
 def convertir(pedido: PedidoConvertir):
-    texto = pedido.texto
     if pedido.ruta:
-        if pedido.ruta.lower().endswith(".docx"):
-            from docx import Document
-            texto = "\n".join(p.text for p in Document(pedido.ruta).paragraphs)
-        else:
-            with open(pedido.ruta, encoding="utf-8", errors="ignore") as f:
-                texto = f.read()
-    if not texto or not texto.strip():
-        raise HTTPException(400, "Pega el texto o elige un archivo .docx, .txt, .srt o .ass.")
-
-    filas, formato = detectar_y_parsear(texto)
+        try:
+            filas, formato = leer_archivo(pedido.ruta)
+        except Exception as e:
+            raise HTTPException(400, f"No se pudo leer el archivo: {e}")
+    else:
+        if not pedido.texto or not pedido.texto.strip():
+            raise HTTPException(400, "Pega el texto o elige un archivo .docx, .txt, .srt o .ass.")
+        filas, formato = detectar_y_parsear(pedido.texto)
     if not filas:
         raise HTTPException(400, "No se detectó ninguna línea. Revisa que el archivo tenga el formato esperado.")
     return {
@@ -474,6 +475,7 @@ def convertir(pedido: PedidoConvertir):
 class PedidoExportar(BaseModel):
     filas: list[dict]
     nombre: str = ""
+    tipo: str = "docx"            # "docx" | "xlsx"
     formato_mmss: bool = False
     carpeta: str | None = None
     origen: str | None = None
@@ -486,12 +488,16 @@ def exportar(pedido: PedidoExportar):
     filas = [f for f in filas if f["dialogo"]]
     if not filas:
         raise HTTPException(400, "No hay filas para exportar.")
+    if pedido.tipo not in ("docx", "xlsx"):
+        raise HTTPException(400, "Formato no soportado.")
+    ext = "." + pedido.tipo
     base = os.path.splitext(os.path.basename(pedido.origen))[0] + "_3columnas" if pedido.origen else "guion_3_columnas"
-    nombre = _nombre_seguro(pedido.nombre, ".docx", base + ".docx")
+    nombre = _nombre_seguro(pedido.nombre, ext, base + ext)
     ruta = _ruta_libre(_carpeta_destino(pedido.carpeta, pedido.origen), nombre)
-    generar_docx_3_columnas(filas, ruta, formato_tc="mmss" if pedido.formato_mmss else "completo")
+    generar = generar_xlsx_3_columnas if pedido.tipo == "xlsx" else generar_docx_3_columnas
+    generar(filas, ruta, formato_tc="mmss" if pedido.formato_mmss else "completo")
     RUTAS_PERMITIDAS.add(os.path.abspath(ruta))
-    return {**_info_archivo(ruta), "tipo": "docx", "lineas": len(filas)}
+    return {**_info_archivo(ruta), "tipo": pedido.tipo, "lineas": len(filas)}
 
 
 # ------------------------------------------------------------------

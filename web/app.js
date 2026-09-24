@@ -52,6 +52,7 @@ const E = {
     tarea: "transcribir",
     modelo: pref.get("modelo", null),
     srt: pref.get("srt", false),
+    xlsx: pref.get("xlsx", false),
     mmss: pref.get("mmss", false),
     nombre: "",
     carpeta: null,
@@ -61,7 +62,7 @@ const E = {
   },
   lib: {
     pestana: "pegar", texto: "", archivo: null, filas: null, formato: null,
-    soloRevisar: false, nombre: "", mmss: false, carpeta: null, resultado: null,
+    soloRevisar: false, nombre: "", mmss: false, carpeta: null, resultados: [],
   },
 };
 
@@ -165,7 +166,12 @@ function subirArchivo(tipo, archivo) {
 function asignarArchivo(tipo, info) {
   if (tipo === "video") E.tc.video = info;
   else if (tipo === "word") E.tc.guion = info;
-  else if (tipo === "libreto") { E.lib.archivo = info; E.lib.pestana = "archivo"; }
+  else if (tipo === "libreto") {
+    E.lib.archivo = info;
+    E.lib.pestana = "archivo";
+    // Soltar o elegir el archivo ya lo convierte: no hace falta darle a "Convertir"
+    if (info?.ruta && info.subiendo === undefined) { convertirLibreto(); return; }
+  }
   dibujar();
 }
 
@@ -219,7 +225,8 @@ function dibujar() {
   const principal = $("#principal");
   const scroll = principal.scrollTop;
   if (!E.estado) return;
-  principal.innerHTML = { timecodes: vistaTimecodes, libreto: vistaLibreto, modelos: vistaModelos }[E.vista]();
+  const vista = { timecodes: vistaTimecodes, libreto: vistaLibreto, modelos: vistaModelos }[E.vista]();
+  principal.innerHTML = `<div class="vista">${vista}</div>`;
   principal.scrollTop = scroll;
   pintarIconos(principal);
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("activo", b.dataset.vista === E.vista));
@@ -428,7 +435,9 @@ function seccionOpciones() {
       <label class="interruptor"><input type="checkbox" data-campo="mmss" ${E.tc.mmss ? "checked" : ""}><span class="pista"></span>
         <span class="interruptor-texto"><b>TIME CODE en formato MMSS</b><span>Convención de doblaje: 0114 = 1 min 14 s, en vez de 00:01:14,300.</span></span></label>
       <label class="interruptor"><input type="checkbox" data-campo="srt" ${E.tc.srt ? "checked" : ""}><span class="pista"></span>
-        <span class="interruptor-texto"><b>Exportar también subtítulos .srt</b><span>Para revisar la sincronía en un reproductor de video.</span></span></label>` : ""}
+        <span class="interruptor-texto"><b>Exportar también subtítulos .srt</b><span>Para revisar la sincronía en un reproductor de video.</span></span></label>
+      <label class="interruptor"><input type="checkbox" data-campo="xlsx" ${E.tc.xlsx ? "checked" : ""}><span class="pista"></span>
+        <span class="interruptor-texto"><b>Exportar también en Excel (.xlsx)</b><span>Las mismas 3 columnas: T.C., PERSONAJE y DIÁLOGO.</span></span></label>` : ""}
       <div class="campo"><label>Nombre del archivo</label>
         <input class="entrada" data-campo="nombre" value="${esc(E.tc.nombre)}" placeholder="${esc(sugerido)}" spellcheck="false"></div>
       ${carpetaFila}
@@ -500,13 +509,14 @@ function panelProgreso(d) {
 }
 
 function filaArchivoSalida(r) {
-  const tipo = r.tipo === "srt" ? "srt" : "word";
+  const tipo = { srt: "srt", xlsx: "excel" }[r.tipo] || "word";
+  const iconoTipo = { srt: "subtitulos", excel: "hoja" }[tipo] || "documento";
   const acciones = escritorio()
     ? `<button class="boton chico" data-accion="abrir" data-valor="${esc(r.ruta)}">${icono("abrir", 14)} Abrir</button>
        <button class="boton chico fantasma" data-accion="mostrar" data-valor="${esc(r.ruta)}">${icono("carpeta", 14)} Mostrar en carpeta</button>`
     : `<a class="boton chico primario" href="/api/descargar?t=${TOKEN}&ruta=${encodeURIComponent(r.ruta)}">${icono("descarga", 14)} Descargar</a>`;
   return `<div class="archivo-salida">
-    <div class="zona-icono" style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--${tipo});background:color-mix(in srgb, var(--${tipo}) 13%, transparent)">${icono(tipo === "srt" ? "subtitulos" : "documento", 19)}</div>
+    <div class="zona-icono" style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--${tipo});background:color-mix(in srgb, var(--${tipo}) 13%, transparent)">${icono(iconoTipo, 19)}</div>
     <div class="zona-archivo"><div class="zona-nombre">${esc(r.nombre)}</div>
       <div class="zona-meta">${escritorio() ? esc(r.ruta) : tamano(r.tamano)}</div></div>
     ${acciones}</div>`;
@@ -540,7 +550,7 @@ async function generar() {
       body: {
         modo: t.modo, video: t.video.ruta, guion: t.modo !== "subtitulos" ? t.guion.ruta : null,
         idioma: t.idioma, alineacion: t.alineacion, modelo: modeloElegido(), tarea: t.tarea,
-        exportar_srt: t.srt, formato_mmss: t.mmss, nombre_salida: t.nombre, carpeta_salida: t.carpeta,
+        exportar_srt: t.srt, exportar_xlsx: t.xlsx, formato_mmss: t.mmss, nombre_salida: t.nombre, carpeta_salida: t.carpeta,
       },
     });
     t.trabajo = id;
@@ -584,7 +594,8 @@ async function seguirTrabajo() {
 function vistaLibreto() {
   const L = E.lib;
   const entrada = L.pestana === "pegar"
-    ? `<textarea class="entrada" data-campo-lib="texto" spellcheck="false" placeholder="Pega aquí el libreto, un .srt o un .ass…&#10;&#10;1 (10:00:02:00)&#10;JEREMY&#9;¡Requin!&#10;PETIT DRAGON&#9;¡Requin!">${esc(L.texto)}</textarea>`
+    ? `<textarea class="entrada" data-campo-lib="texto" spellcheck="false" placeholder="Pega aquí el libreto, un .srt o un .ass… o arrastra el archivo a esta ventana.&#10;&#10;1 (10:00:02:00)&#10;JEREMY&#9;¡Requin!&#10;PETIT DRAGON&#9;¡Requin!">${esc(L.texto)}</textarea>
+      <div class="ayuda" style="margin-top:8px">${icono("subir", 13)} También puedes <b>arrastrar un archivo</b> (.docx, .txt, .srt o .ass) a cualquier parte de esta página: se convierte solo.</div>`
     : `<div class="archivos">${zonaArchivo("libreto", L.archivo, "Libreto o subtítulos", ".docx, .txt, .srt o .ass")}</div>`;
 
   const puede = L.pestana === "pegar" ? L.texto.trim() : L.archivo && L.archivo.subiendo === undefined;
@@ -592,7 +603,10 @@ function vistaLibreto() {
   let tabla = "";
   if (L.filas) {
     const revisar = L.filas.filter((f) => f.revisar).length;
-    const formatos = { libreto: "libreto tradicional", guion_numerado: "guion numerado", srt: "subtítulos .srt", ass: "subtítulos .ass" };
+    const formatos = {
+      libreto: "libreto tradicional", guion_numerado: "guion numerado", guion_broadcast: 'guion "as broadcast"',
+      guion_estilos: "guion con estilos de Word", tabla_word: "tabla de Word", srt: "subtítulos .srt", ass: "subtítulos .ass",
+    };
     const conTc = L.filas.some((f) => f.timecode);
     const filas = L.filas.map((f, i) => (L.soloRevisar && !f.revisar) ? "" : `
       <tr class="${f.revisar ? "revisar" : ""}" data-fila="${i}">
@@ -621,10 +635,11 @@ function vistaLibreto() {
     </section>
 
     <section class="seccion">
-      <h2 class="seccion-titulo"><span class="paso-num">3</span>Exportar a Word</h2>
+      <h2 class="seccion-titulo"><span class="paso-num">3</span>Exportar</h2>
       <div class="rejilla">
         <div class="campo"><label>Nombre del archivo</label>
-          <input class="entrada" data-campo-lib="nombre" value="${esc(L.nombre)}" placeholder="${esc((L.archivo && L.pestana === "archivo" ? nombreBase(L.archivo.nombre) + "_3columnas" : "guion_3_columnas") + ".docx")}" spellcheck="false"></div>
+          <input class="entrada" data-campo-lib="nombre" value="${esc(L.nombre)}" placeholder="${esc(L.archivo && L.pestana === "archivo" ? nombreBase(L.archivo.nombre) + "_3columnas" : "guion_3_columnas")}" spellcheck="false">
+          <span class="ayuda">La extensión (.docx o .xlsx) se pone sola.</span></div>
         ${escritorio() ? `<div class="campo"><span class="rotulo">Guardar en</span><div class="fila-carpeta">
           <div class="entrada">${L.carpeta ? esc(L.carpeta) : L.archivo?.ruta && L.pestana === "archivo" ? "La misma carpeta del archivo" : "Carpeta de salidas de la app"}</div>
           <button class="boton" data-accion="carpeta-lib">${icono("carpeta", 15)} Cambiar</button></div></div>` : ""}
@@ -632,14 +647,15 @@ function vistaLibreto() {
           <span class="interruptor-texto"><b>TIME CODE en formato MMSS</b><span>0114 = 1 min 14 s, en vez de 00:01:14,300.</span></span></label>` : ""}
       </div>
       <div style="display:flex; gap:10px; margin-top:18px; align-items:center">
-        <button class="boton primario grande" data-accion="exportar">${icono("documento", 17)} Exportar a Word</button>
+        <button class="boton primario grande" data-accion="exportar" data-valor="docx">${icono("documento", 17)} Exportar a Word</button>
+        <button class="boton grande" data-accion="exportar" data-valor="xlsx">${icono("hoja", 17)} Exportar a Excel</button>
       </div>
-      ${L.resultado ? `<div style="margin-top:14px">${filaArchivoSalida(L.resultado)}</div>` : ""}
+      ${L.resultados.length ? `<div style="margin-top:14px">${L.resultados.map(filaArchivoSalida).join("")}</div>` : ""}
     </section>`;
   }
 
   return `<div class="encabezado"><h1>Convertir libreto a 3 columnas</h1>
-      <p>Convierte un libreto tradicional, un guion numerado o subtítulos .srt / .ass en una tabla TIME CODE · PERSONAJE · DIÁLOGO lista para Word.</p></div>
+      <p>Convierte un libreto tradicional, un guion numerado o "as broadcast", un Word con tabla (como los ASR de CaptionMax) o subtítulos .srt / .ass en una tabla T.C. · PERSONAJE · DIÁLOGO para Word o Excel.</p></div>
     <section class="seccion">
       <h2 class="seccion-titulo"><span class="paso-num">1</span>Texto de entrada</h2>
       <div class="pestanas">
@@ -660,22 +676,23 @@ async function convertirLibreto() {
   try {
     const cuerpo = L.pestana === "pegar" ? { texto: L.texto } : { ruta: L.archivo.ruta };
     const r = await api("/api/libreto/convertir", { method: "POST", body: cuerpo });
-    L.filas = r.filas; L.formato = r.formato; L.resultado = null; L.soloRevisar = false;
+    L.filas = r.filas; L.formato = r.formato; L.resultados = []; L.soloRevisar = false;
     dibujar();
     setTimeout(() => document.querySelector(".tabla-marco")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   } catch (e) { avisar(e.message); }
 }
 
-async function exportarLibreto() {
+async function exportarLibreto(tipo = "docx") {
   const L = E.lib;
   try {
-    L.resultado = await api("/api/libreto/exportar", {
+    const r = await api("/api/libreto/exportar", {
       method: "POST",
-      body: { filas: L.filas, nombre: L.nombre, formato_mmss: L.mmss, carpeta: L.carpeta,
+      body: { filas: L.filas, nombre: L.nombre, tipo, formato_mmss: L.mmss, carpeta: L.carpeta,
         origen: L.pestana === "archivo" ? L.archivo?.ruta : null },
     });
+    L.resultados = [r, ...L.resultados.filter((x) => x.ruta !== r.ruta)];
     dibujar();
-    avisar(`Documento generado (${L.resultado.lineas} líneas).`);
+    avisar(`${tipo === "xlsx" ? "Excel" : "Word"} generado (${r.lineas} líneas).`);
   } catch (e) { avisar(e.message); }
 }
 
@@ -837,7 +854,7 @@ const ACCIONES = {
   pestana(v) { E.lib.pestana = v; dibujar(); },
   convertir: convertirLibreto,
   exportar: exportarLibreto,
-  "limpiar-lib"() { Object.assign(E.lib, { texto: "", archivo: null, filas: null, formato: null, resultado: null, nombre: "" }); dibujar(); },
+  "limpiar-lib"() { Object.assign(E.lib, { texto: "", archivo: null, filas: null, formato: null, resultados: [], nombre: "" }); dibujar(); },
   "solo-revisar"() { E.lib.soloRevisar = !E.lib.soloRevisar; dibujar(); },
   "fila-mas"(v) { E.lib.filas.splice(Number(v) + 1, 0, { timecode: "", personaje: "", dialogo: "", revisar: false }); dibujar(); },
   "fila-borrar"(v) { E.lib.filas.splice(Number(v), 1); dibujar(); },
@@ -885,7 +902,7 @@ document.addEventListener("input", (e) => {
   if (t.dataset.campo) {
     const valor = t.type === "checkbox" ? t.checked : t.value;
     E.tc[t.dataset.campo] = valor;
-    if (["idioma", "srt", "mmss"].includes(t.dataset.campo)) pref.set(t.dataset.campo, valor);
+    if (["idioma", "srt", "xlsx", "mmss"].includes(t.dataset.campo)) pref.set(t.dataset.campo, valor);
     if (t.dataset.campo === "idioma") dibujar(); // los avisos del modelo dependen del idioma
   } else if (t.dataset.campoLib) {
     E.lib[t.dataset.campoLib] = t.type === "checkbox" ? t.checked : t.value;
