@@ -48,7 +48,7 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-icono = os.path.join(SPECPATH, "icono.ico" if ES_WINDOWS else "icono.png")
+icono = os.path.join(SPECPATH, "icono.ico" if ES_WINDOWS else "icono.icns" if ES_MAC else "icono.png")
 
 exe = EXE(
     pyz,

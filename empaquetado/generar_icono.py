@@ -54,4 +54,5 @@ if __name__ == "__main__":
     icono.resize((256, 256), Image.LANCZOS).save(os.path.join(RAIZ, "web", "icono.png"))
     icono.resize((512, 512), Image.LANCZOS).save(os.path.join(AQUI, "icono.png"))
     icono.save(os.path.join(AQUI, "icono.ico"), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    icono.save(os.path.join(AQUI, "icono.icns"))  # Mac: así PyInstaller no necesita Pillow para convertirlo
     print("Íconos generados.")
