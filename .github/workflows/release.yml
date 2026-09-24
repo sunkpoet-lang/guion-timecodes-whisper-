@@ -5,14 +5,16 @@
 #   git push origin v2.0.1
 # En unos 15 minutos aparece en la pestaña "Releases" con los tres descargables.
 #
-# También se puede correr a mano desde la pestaña "Actions" (Run workflow):
-# compila y deja los archivos como "artifacts" del run, sin publicar release.
+# Cada push a una rama que no sea main (y el botón "Run workflow" de la pestaña
+# Actions) solo compila: deja los archivos como "artifacts" del run para
+# probarlos, sin publicar release.
 
 name: Compilar y publicar
 
 on:
   push:
     tags: ["v*"]
+    branches-ignore: ["main"]
   workflow_dispatch:
 
 permissions:
