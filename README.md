@@ -17,8 +17,11 @@ App de escritorio para producción de doblaje, con [Whisper](https://github.com/
   - Word que ya trae una tabla (como los ASR de CaptionMax: `# | Timecode | Character | Dialogue`):
     se toman solo esas tres columnas y se descarta la numeración `#`;
   - subtítulos `.srt` / `.ass` (el T.C. sale del archivo y PERSONAJE queda vacío para asignarlo).
+- **Traducir**: traduce el guion con un modelo de lenguaje que corre **en tu equipo, sin internet**,
+  siguiendo el **perfil de estilo** de cada traductor (sus reglas en lenguaje natural y su glosario).
+  El resultado es un borrador para revisar, con el T.C. intacto y la columna PERSONAJE adaptada.
 - **Modelos y equipo**: detecta tu procesador, RAM y tarjeta de video, recomienda el mejor modelo
-  de Whisper para tu equipo, descarga otros modelos y activa la GPU NVIDIA con un clic.
+  de Whisper y de traducción para tu equipo, los descarga y activa la GPU NVIDIA con un clic.
 
 ## Descargar
 
@@ -65,6 +68,38 @@ Todo lo descargado vive en la carpeta de datos del usuario y se conserva al actu
 - Windows: `%LOCALAPPDATA%\GuionTimecodes`
 - Mac: `~/Library/Application Support/GuionTimecodes`
 - Linux: `~/.local/share/guion-timecodes`
+
+## Traducción sin internet
+
+La traducción corre con [llama.cpp](https://github.com/ggml-org/llama.cpp), que la app descarga la
+primera vez (~30 MB). En Windows y Linux usa la versión Vulkan, que acelera con GPUs NVIDIA, AMD e Intel;
+en Mac usa Metal. Sin GPU compatible, usa el procesador.
+
+| Modelo | Descarga | Pensado para |
+|---|---|---|
+| Qwen 3.5 2B | 1.2 GB | Solo CPU o poca RAM |
+| Qwen 3.5 4B | 2.6 GB | CPU o GPU modesta |
+| Gemma 4 E4B | 4.8 GB | GPU de 6 GB |
+| Qwen 3.5 9B | 5.3 GB | GPU de 8 GB |
+| Gemma 4 12B | 6.5 GB | GPU de 10–12 GB (un episodio de 460 líneas en ~8 min con una RTX 2060) |
+| Gemma 4 26B A4B | 13.4 GB | GPU de 16 GB+, o CPU con 32 GB de RAM |
+
+Todos son Apache 2.0 (se pueden usar en trabajo comercial). La app recomienda el mejor que cabe en
+tu GPU, con el tiempo estimado por episodio.
+
+**Perfiles de estilo.** Cada traductor o serie tiene el suyo:
+- **Reglas** en lenguaje natural (registro, tú/usted, palabras prohibidas, interjecciones…). Se pueden
+  importar de un `estilo.md` o `.txt`.
+- **Glosario**: personajes (ORIGINAL · DOBLAJE · VARIANTES · EN_DIALOGO) y términos. Se importa de un
+  Excel con las pestañas `PERSONAJES` y `TERMINOS`, o de cualquier hoja con columnas `ORIGINAL` y `DOBLAJE`.
+- **Acotaciones**: opcionalmente, todo paréntesis del diálogo se reemplaza por una marca fija, por ejemplo `(REAC)`.
+- **MAYÚSCULAS** para entregar en formato de rayado.
+- Se exportan como `.perfil.json` para compartirlos con otros traductores.
+
+Cómo traduce: por bloques de 16 líneas con el contexto anterior y siguiente, mandando solo las
+entradas del glosario que aparecen en cada bloque. La columna PERSONAJE se adapta con el glosario sin
+pasar por el modelo. Al final marca para revisar las líneas donde no se respetó el glosario, y lista
+los personajes que faltan en el glosario (con un botón para agregarlos).
 
 ## Formato del guion de entrada
 
@@ -181,12 +216,16 @@ el documento desde ese respaldo automáticamente. Por línea de comandos, agrega
 ```
 app.py                   # Punto de entrada: ventana de escritorio (pywebview) o navegador
 servidor.py              # API local (FastAPI) que usa la interfaz
-web/                     # Interfaz: index.html, estilos.css, app.js, iconos.js
+web/                     # Interfaz: index.html, estilos.css, app.js, traducir.js, iconos.js
 alinear_timecodes.py     # Whisper + alineación + Word/SRT (también se usa por línea de comandos)
 convertir_libreto.py     # Libreto tradicional / guion numerado / .srt / .ass → 3 columnas
 hardware.py              # Detección de CPU, RAM y GPU
-modelos.py               # Catálogo, descarga y recomendación de modelos
+modelos.py               # Catálogo, descarga y recomendación de modelos de Whisper
 cuda_runtime.py          # Descarga de cuBLAS/cuDNN para la GPU
+motor_llm.py             # Motor de traducción: instala y levanta llama.cpp (llama-server)
+modelos_traduccion.py    # Catálogo, descarga y recomendación de modelos de traducción
+perfiles.py              # Perfiles de estilo y glosarios (importación desde Excel / estilo.md)
+traductor.py             # Traducción por bloques con glosario y revisión
 rutas.py, version.py     # Carpetas de datos y versión de la app
 empaquetado/             # PyInstaller, Inno Setup, ícono y descarga del modelo incluido
 .github/workflows/       # Compilación y publicación automática de releases

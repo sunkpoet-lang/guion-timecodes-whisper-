@@ -38,6 +38,10 @@ from pydantic import BaseModel
 import cuda_runtime
 import hardware
 import modelos
+import modelos_traduccion
+import motor_llm
+import perfiles
+import traductor
 from convertir_libreto import detectar_y_parsear, generar_docx_3_columnas, generar_xlsx_3_columnas, leer_archivo
 from rutas import CARPETA_APP, CARPETA_SALIDAS, CARPETA_SUBIDAS, CARPETA_WEB, EMPAQUETADO
 from version import REPO_GITHUB, VERSION
@@ -56,6 +60,11 @@ def verificar_token(request: Request):
 
 
 api = Depends(verificar_token)
+
+
+class Ruta(BaseModel):
+    ruta: str
+    carpeta: bool = False
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -88,8 +97,10 @@ def _hw():
 
 @app.get("/api/estado", dependencies=[api])
 def estado():
+    hw = _hw()
     return {"version": VERSION, "sistema": SISTEMA, "escritorio": ESCRITORIO["activo"],
-            "ocupado": _trabajo_activo() is not None, **modelos.resumen(_hw()), "cuda_instalacion": CUDA_JOB}
+            "ocupado": _trabajo_activo() is not None, **modelos.resumen(hw), "cuda_instalacion": CUDA_JOB,
+            "traduccion": {**modelos_traduccion.resumen(hw), "instalacion_motor": MOTOR_JOB}}
 
 
 # ------------------------------------------------------------------
@@ -160,6 +171,180 @@ def borrar_cuda():
 
 
 # ------------------------------------------------------------------
+# Traducción: motor (llama.cpp), modelos y perfiles
+# ------------------------------------------------------------------
+
+MOTOR_JOB = {"activo": False, "etapa": "", "hechos": 0, "total": 0, "error": None, "cancelar": False}
+
+
+def _instalar_motor():
+    def progreso(etapa, hechos, total):
+        MOTOR_JOB.update(etapa=etapa, hechos=hechos, total=total)
+    try:
+        motor_llm.instalar(progreso, cancelado=lambda: MOTOR_JOB["cancelar"])
+    except Exception as e:
+        MOTOR_JOB["error"] = str(e)
+    finally:
+        MOTOR_JOB["activo"] = False
+
+
+@app.post("/api/motor/instalar", dependencies=[api])
+def instalar_motor():
+    if not MOTOR_JOB["activo"]:
+        MOTOR_JOB.update(activo=True, etapa="Preparando…", hechos=0, total=0, error=None, cancelar=False)
+        threading.Thread(target=_instalar_motor, daemon=True).start()
+    return {"ok": True}
+
+
+@app.delete("/api/motor", dependencies=[api])
+def borrar_motor():
+    motor_llm.desinstalar()
+    return {"ok": True}
+
+
+def _validar_modelo_traduccion(id_modelo):
+    if id_modelo not in modelos_traduccion.POR_ID:
+        raise HTTPException(404, "Modelo desconocido")
+
+
+@app.post("/api/traduccion/modelos/{id_modelo}/descargar", dependencies=[api])
+def descargar_modelo_traduccion(id_modelo: str):
+    _validar_modelo_traduccion(id_modelo)
+    modelos_traduccion.iniciar_descarga(id_modelo)
+    return {"ok": True}
+
+
+@app.post("/api/traduccion/modelos/{id_modelo}/cancelar", dependencies=[api])
+def cancelar_modelo_traduccion(id_modelo: str):
+    _validar_modelo_traduccion(id_modelo)
+    modelos_traduccion.cancelar_descarga(id_modelo)
+    return {"ok": True}
+
+
+@app.delete("/api/traduccion/modelos/{id_modelo}", dependencies=[api])
+def borrar_modelo_traduccion(id_modelo: str):
+    _validar_modelo_traduccion(id_modelo)
+    if _trabajo_activo():
+        raise HTTPException(409, "Espera a que termine el trabajo en curso.")
+    modelos_traduccion.borrar(id_modelo)
+    return {"ok": True}
+
+
+@app.get("/api/perfiles", dependencies=[api])
+def listar_perfiles():
+    return perfiles.listar()
+
+
+@app.post("/api/perfiles", dependencies=[api])
+def guardar_perfil(perfil: dict):
+    if not (perfil.get("nombre") or "").strip():
+        raise HTTPException(400, "El perfil necesita un nombre.")
+    return perfiles.guardar(perfil)
+
+
+@app.delete("/api/perfiles/{id_perfil}", dependencies=[api])
+def borrar_perfil(id_perfil: str):
+    perfiles.borrar(id_perfil)
+    return {"ok": True}
+
+
+@app.post("/api/perfiles/importar-glosario", dependencies=[api])
+def importar_glosario(datos: Ruta):
+    try:
+        return perfiles.importar_glosario(datos.ruta)
+    except Exception as e:
+        raise HTTPException(400, f"No se pudo leer el glosario: {e}")
+
+
+@app.post("/api/perfiles/importar-estilo", dependencies=[api])
+def importar_estilo(datos: Ruta):
+    try:
+        return {"texto": perfiles.importar_estilo(datos.ruta)}
+    except Exception as e:
+        raise HTTPException(400, f"No se pudo leer el archivo: {e}")
+
+
+@app.post("/api/perfiles/importar", dependencies=[api])
+def importar_perfil(datos: Ruta):
+    """Importa un perfil exportado (.json) por otro traductor."""
+    try:
+        with open(datos.ruta, encoding="utf-8") as f:
+            perfil = json.load(f)
+        perfil.pop("id", None)
+        return perfiles.guardar(perfil)
+    except Exception as e:
+        raise HTTPException(400, f"No es un perfil válido: {e}")
+
+
+class PedidoExportarPerfil(BaseModel):
+    carpeta: str | None = None
+
+
+@app.post("/api/perfiles/{id_perfil}/exportar", dependencies=[api])
+def exportar_perfil(id_perfil: str, pedido: PedidoExportarPerfil):
+    perfil = perfiles.obtener(id_perfil)
+    nombre = _nombre_seguro(perfil["nombre"], ".json", "perfil.json").replace(".json", ".perfil.json")
+    ruta = _ruta_libre(_carpeta_destino(pedido.carpeta), nombre)
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump({k: v for k, v in perfil.items() if k != "id"}, f, ensure_ascii=False, indent=2)
+    RUTAS_PERMITIDAS.add(os.path.abspath(ruta))
+    return {**_info_archivo(ruta), "tipo": "json"}
+
+
+class PedidoTraducir(BaseModel):
+    ruta: str | None = None
+    filas: list[dict] | None = None
+    perfil: str
+    modelo: str
+
+
+def _ejecutar_traduccion(trabajo, pedido: PedidoTraducir):
+    try:
+        filas = pedido.filas
+        if not filas:
+            filas, formato = leer_archivo(pedido.ruta)
+            trabajo["log"].append(f"Se leyeron {len(filas)} líneas ({formato}).")
+        perfil = perfiles.obtener(pedido.perfil)
+        en_gpu = modelos_traduccion.evaluar(_hw())[pedido.modelo]["dispositivo"] == "gpu"
+
+        def progreso(hechas, total, resultado):
+            trabajo.update(etapa="Traduciendo", hechas=hechas, total=total,
+                           progreso=hechas / total if total else 0, filas=[dict(f) for f in resultado])
+
+        trabajo["etapa"] = "Cargando modelo"
+        resultado, sin_glosario = traductor.traducir(filas, perfil, pedido.modelo, en_gpu, progreso,
+                                                     cancelado=lambda: trabajo["cancelado"], log=trabajo["log"].append)
+        trabajo.update(filas=resultado, sin_glosario=sin_glosario, estado="listo", progreso=1)
+        trabajo["log"].append(f"Listo. {sum(f['revisar'] for f in resultado)} línea(s) para revisar.")
+    except InterruptedError:
+        trabajo["estado"] = "cancelado"
+    except Exception as e:
+        trabajo["estado"] = "error"
+        trabajo["error"] = str(e)
+    finally:
+        trabajo["fin"] = time.time()
+
+
+@app.post("/api/traducir", dependencies=[api])
+def crear_traduccion(pedido: PedidoTraducir):
+    if _trabajo_activo():
+        raise HTTPException(409, "Ya hay un trabajo en curso.")
+    _validar_modelo_traduccion(pedido.modelo)
+    if not motor_llm.instalado():
+        raise HTTPException(400, "Falta instalar el motor de traducción (en Modelos y equipo).")
+    if not modelos_traduccion.instalado(pedido.modelo):
+        raise HTTPException(400, "Ese modelo de traducción no está descargado.")
+    if not pedido.filas and not (pedido.ruta and os.path.isfile(pedido.ruta)):
+        raise HTTPException(400, "Falta el guion a traducir.")
+    trabajo = {"id": uuid.uuid4().hex[:10], "tipo": "traduccion", "estado": "corriendo", "etapa": "Iniciando",
+               "progreso": 0, "hechas": 0, "total": 0, "filas": [], "sin_glosario": {}, "log": [], "error": None,
+               "cancelado": False, "inicio": time.time(), "fin": None}
+    TRABAJOS[trabajo["id"]] = trabajo
+    threading.Thread(target=_ejecutar_traduccion, args=(trabajo, pedido), daemon=True).start()
+    return {"id": trabajo["id"]}
+
+
+# ------------------------------------------------------------------
 # Archivos
 # ------------------------------------------------------------------
 
@@ -169,11 +354,6 @@ RUTAS_PERMITIDAS = set()
 
 def _info_archivo(ruta):
     return {"ruta": ruta, "nombre": os.path.basename(ruta), "tamano": os.path.getsize(ruta)}
-
-
-class Ruta(BaseModel):
-    ruta: str
-    carpeta: bool = False
 
 
 @app.post("/api/archivo", dependencies=[api])
@@ -414,7 +594,8 @@ def crear_trabajo(pedido: PedidoTrabajo):
     if not os.path.isfile(pedido.video):
         raise HTTPException(400, "No se encontró el video.")
     _validar_modelo(pedido.modelo)
-    trabajo = {"id": uuid.uuid4().hex[:10], "estado": "corriendo", "etapa": "Iniciando", "progreso": 0,
+    motor_llm.SERVIDOR.detener()  # libera la memoria de la GPU que pudiera tener el modelo de traducción
+    trabajo = {"id": uuid.uuid4().hex[:10], "tipo": "timecodes", "estado": "corriendo", "etapa": "Iniciando", "progreso": 0,
                "log": [], "resultados": [], "error": None, "aviso_cpu": False, "idioma_detectado": None,
                "cancelado": False, "inicio": time.time(), "fin": None}
     TRABAJOS[trabajo["id"]] = trabajo
@@ -476,6 +657,7 @@ class PedidoExportar(BaseModel):
     filas: list[dict]
     nombre: str = ""
     tipo: str = "docx"            # "docx" | "xlsx"
+    incluir_original: bool = False  # traducciones: agrega la columna ORIGINAL
     formato_mmss: bool = False
     carpeta: str | None = None
     origen: str | None = None
@@ -484,7 +666,8 @@ class PedidoExportar(BaseModel):
 @app.post("/api/libreto/exportar", dependencies=[api])
 def exportar(pedido: PedidoExportar):
     filas = [{"timecode": (f.get("timecode") or "").strip(), "personaje": (f.get("personaje") or "").strip(),
-              "dialogo": (f.get("dialogo") or "").strip()} for f in pedido.filas]
+              "dialogo": (f.get("dialogo") or "").strip(), "original": (f.get("original") or "").strip()}
+             for f in pedido.filas]
     filas = [f for f in filas if f["dialogo"]]
     if not filas:
         raise HTTPException(400, "No hay filas para exportar.")
@@ -495,7 +678,8 @@ def exportar(pedido: PedidoExportar):
     nombre = _nombre_seguro(pedido.nombre, ext, base + ext)
     ruta = _ruta_libre(_carpeta_destino(pedido.carpeta, pedido.origen), nombre)
     generar = generar_xlsx_3_columnas if pedido.tipo == "xlsx" else generar_docx_3_columnas
-    generar(filas, ruta, formato_tc="mmss" if pedido.formato_mmss else "completo")
+    generar(filas, ruta, formato_tc="mmss" if pedido.formato_mmss else "completo",
+            columna_original=pedido.incluir_original)
     RUTAS_PERMITIDAS.add(os.path.abspath(ruta))
     return {**_info_archivo(ruta), "tipo": pedido.tipo, "lineas": len(filas)}
 

@@ -65,6 +65,10 @@ class ApiEscritorio:
         "video": ("Video o audio (*.mp4;*.mov;*.mkv;*.avi;*.mxf;*.wav;*.mp3;*.m4a)", "Todos los archivos (*.*)"),
         "word": ("Documento de Word (*.docx)",),
         "libreto": ("Libreto o subtítulos (*.docx;*.txt;*.srt;*.ass)", "Todos los archivos (*.*)"),
+        "traducir": ("Guion (*.docx;*.xlsx;*.txt;*.srt;*.ass)", "Todos los archivos (*.*)"),
+        "glosario": ("Glosario de Excel (*.xlsx)",),
+        "estilo": ("Reglas de estilo (*.md;*.txt)",),
+        "perfil": ("Perfil de traducción (*.json)",),
     }
 
     def __init__(self):

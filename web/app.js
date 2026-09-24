@@ -7,6 +7,11 @@ const $ = (sel, raiz = document) => raiz.querySelector(sel);
 
 const EXT_VIDEO = ["mp4", "mov", "mkv", "avi", "mxf", "wav", "mp3", "m4a", "aac", "flac", "webm", "m4v"];
 const EXT_LIBRETO = ["docx", "txt", "srt", "ass"];
+// Extensiones que acepta cada tipo de archivo (diálogo del navegador y arrastrar y soltar)
+const ACEPTA = {
+  video: EXT_VIDEO, word: ["docx"], libreto: EXT_LIBRETO,
+  traducir: ["docx", "xlsx", "txt", "srt", "ass"], glosario: ["xlsx"], estilo: ["md", "txt"], perfil: ["json"],
+};
 
 const IDIOMAS = [
   ["en", "Inglés"], ["es", "Español"], ["fr", "Francés"], ["ja", "Japonés"], ["pt", "Portugués"],
@@ -137,7 +142,7 @@ async function elegirArchivo(tipo) {
   }
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = { video: EXT_VIDEO, word: ["docx"], libreto: EXT_LIBRETO }[tipo].map((e) => "." + e).join(",");
+  input.accept = ACEPTA[tipo].map((e) => "." + e).join(",");
   input.onchange = () => input.files[0] && subirArchivo(tipo, input.files[0]);
   input.click();
 }
@@ -164,6 +169,7 @@ function subirArchivo(tipo, archivo) {
 }
 
 function asignarArchivo(tipo, info) {
+  if (window.asignarArchivoTraducir?.(tipo, info)) return;  // tipos de la vista Traducir (traducir.js)
   if (tipo === "video") E.tc.video = info;
   else if (tipo === "word") E.tc.guion = info;
   else if (tipo === "libreto") {
@@ -179,10 +185,7 @@ function asignarArchivo(tipo, info) {
 window.recibirArchivosSoltados = async (rutas) => {
   for (const ruta of rutas) {
     const ext = extension(ruta);
-    let tipo = null;
-    if (E.vista === "libreto" && EXT_LIBRETO.includes(ext)) tipo = "libreto";
-    else if (E.vista === "timecodes" && EXT_VIDEO.includes(ext)) tipo = "video";
-    else if (E.vista === "timecodes" && ext === "docx") tipo = "word";
+    const tipo = tipoPorExtension(ext);
     if (!tipo) { avisar(`No se puede usar un archivo .${ext} aquí.`); continue; }
     try {
       asignarArchivo(tipo, await api("/api/archivo", { method: "POST", body: { ruta } }));
@@ -190,6 +193,15 @@ window.recibirArchivosSoltados = async (rutas) => {
   }
   document.querySelectorAll(".zona.sobre").forEach((z) => z.classList.remove("sobre"));
 };
+
+// A qué campo va un archivo soltado, según la vista y su extensión
+function tipoPorExtension(ext) {
+  if (E.vista === "libreto") return EXT_LIBRETO.includes(ext) ? "libreto" : null;
+  if (E.vista === "traducir") return window.tipoSoltadoTraducir?.(ext) || null;
+  if (E.vista !== "timecodes") return null;
+  if (EXT_VIDEO.includes(ext)) return "video";
+  return ext === "docx" ? "word" : null;
+}
 
 // En el navegador: arrastrar y soltar sube el archivo
 document.addEventListener("dragover", (e) => {
@@ -210,9 +222,7 @@ document.addEventListener("drop", (e) => {
   for (const archivo of archivos) {
     const ext = extension(archivo.name);
     let tipo = zona?.dataset.tipo;
-    if (!tipo || (tipo === "video" && !EXT_VIDEO.includes(ext)) || (tipo === "word" && ext !== "docx")) {
-      tipo = E.vista === "libreto" ? "libreto" : EXT_VIDEO.includes(ext) ? "video" : ext === "docx" ? "word" : null;
-    }
+    if (!tipo || !ACEPTA[tipo]?.includes(ext)) tipo = tipoPorExtension(ext);
     if (tipo) subirArchivo(tipo, archivo);
   }
 });
@@ -221,11 +231,14 @@ document.addEventListener("drop", (e) => {
 // Dibujo general
 // ------------------------------------------------------------------
 
+// Cada vista es una función que devuelve su HTML; traducir.js agrega la suya
+const VISTAS = { timecodes: () => vistaTimecodes(), libreto: () => vistaLibreto(), modelos: () => vistaModelos() };
+
 function dibujar() {
   const principal = $("#principal");
   const scroll = principal.scrollTop;
   if (!E.estado) return;
-  const vista = { timecodes: vistaTimecodes, libreto: vistaLibreto, modelos: vistaModelos }[E.vista]();
+  const vista = VISTAS[E.vista]();
   principal.innerHTML = `<div class="vista">${vista}</div>`;
   principal.scrollTop = scroll;
   pintarIconos(principal);
@@ -253,6 +266,7 @@ function dibujarLateral() {
   $("#modo-app").textContent = s.escritorio ? "" : "navegador";
   const navTc = document.querySelector('.nav-item[data-vista="timecodes"]');
   navTc.classList.toggle("trabajando", hayTrabajoCorriendo());
+  document.querySelector('.nav-item[data-vista="traducir"]')?.classList.toggle("trabajando", E.tr?.datos?.estado === "corriendo");
 }
 
 // ------------------------------------------------------------------
@@ -508,18 +522,20 @@ function panelProgreso(d) {
   </section>`;
 }
 
-function filaArchivoSalida(r) {
+function filaArchivoSalida(r, conTraducir = false) {
   const tipo = { srt: "srt", xlsx: "excel" }[r.tipo] || "word";
   const iconoTipo = { srt: "subtitulos", excel: "hoja" }[tipo] || "documento";
   const acciones = escritorio()
     ? `<button class="boton chico" data-accion="abrir" data-valor="${esc(r.ruta)}">${icono("abrir", 14)} Abrir</button>
        <button class="boton chico fantasma" data-accion="mostrar" data-valor="${esc(r.ruta)}">${icono("carpeta", 14)} Mostrar en carpeta</button>`
     : `<a class="boton chico primario" href="/api/descargar?t=${TOKEN}&ruta=${encodeURIComponent(r.ruta)}">${icono("descarga", 14)} Descargar</a>`;
+  const traducir = conTraducir
+    ? `<button class="boton chico fantasma" data-accion="traducir-archivo" data-valor="${esc(r.ruta)}" title="Abrir en Traducir">${icono("idiomas", 14)} Traducir</button>` : "";
   return `<div class="archivo-salida">
     <div class="zona-icono" style="width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--${tipo});background:color-mix(in srgb, var(--${tipo}) 13%, transparent)">${icono(iconoTipo, 19)}</div>
     <div class="zona-archivo"><div class="zona-nombre">${esc(r.nombre)}</div>
       <div class="zona-meta">${escritorio() ? esc(r.ruta) : tamano(r.tamano)}</div></div>
-    ${acciones}</div>`;
+    ${traducir}${acciones}</div>`;
 }
 
 function panelResultado(d) {
@@ -534,7 +550,7 @@ function panelResultado(d) {
     <div class="resultado-cabecera"><div class="resultado-icono">${icono("check", 22, 2.5)}</div>
       <div><h2>¡Listo!</h2><p>Terminó en ${reloj(d.transcurrido)}${d.idioma_detectado ? ` · idioma detectado: ${esc(d.idioma_detectado)}` : ""}.</p></div>
       <button class="boton" style="margin-left:auto" data-accion="volver">${icono("reintentar", 14)} Nuevo trabajo</button></div>
-    ${d.resultados.map(filaArchivoSalida).join("")}
+    ${d.resultados.map((r) => filaArchivoSalida(r, true)).join("")}
     ${lineas.filter((l) => l.startsWith("Atención")).map((l) =>
       `<div class="aviso amarillo" style="margin-top:12px">${icono("alerta", 17)}<div>${esc(l)}</div></div>`).join("")}
     ${d.aviso_cpu ? `<div class="aviso amarillo" style="margin-top:12px">${icono("alerta", 17)}<div>Se usó el procesador porque la GPU falló. Revisa <a href="#" data-accion="ir" data-valor="modelos">Modelos y equipo</a>.</div></div>` : ""}
@@ -649,6 +665,7 @@ function vistaLibreto() {
       <div style="display:flex; gap:10px; margin-top:18px; align-items:center">
         <button class="boton primario grande" data-accion="exportar" data-valor="docx">${icono("documento", 17)} Exportar a Word</button>
         <button class="boton grande" data-accion="exportar" data-valor="xlsx">${icono("hoja", 17)} Exportar a Excel</button>
+        <button class="boton grande fantasma" style="margin-left:auto" data-accion="traducir-tabla">${icono("idiomas", 17)} Traducir esta tabla</button>
       </div>
       ${L.resultados.length ? `<div style="margin-top:14px">${L.resultados.map(filaArchivoSalida).join("")}</div>` : ""}
     </section>`;
@@ -798,7 +815,8 @@ function vistaModelos() {
     <section class="seccion">
       <h2 class="seccion-titulo">Modelos de Whisper<span class="extra">Tiempos estimados para un episodio de 22 min</span></h2>
       <div class="lista-modelos">${tarjetas}</div>
-    </section>`;
+    </section>
+    ${window.seccionModelosTraduccion?.() || ""}`;
 }
 
 // ------------------------------------------------------------------
@@ -809,6 +827,12 @@ async function refrescarEstado() {
   E.estado = await api("/api/estado");
 }
 
+function hayDescargasActivas() {
+  const s = E.estado, t = s.traduccion;
+  const bajando = (m) => m.descarga && !m.descarga.error;
+  return s.cuda_instalacion.activo || s.modelos.some(bajando) || t.instalacion_motor.activo || t.modelos.some(bajando);
+}
+
 let sondeando = false;
 async function sondearDescargas() {
   if (sondeando) return;
@@ -816,7 +840,7 @@ async function sondearDescargas() {
   while (true) {
     await new Promise((r) => setTimeout(r, 900));
     try { await refrescarEstado(); } catch { continue; }
-    const activas = E.estado.cuda_instalacion.activo || E.estado.modelos.some((m) => m.descarga && !m.descarga.error);
+    const activas = hayDescargasActivas();
     if (E.vista === "modelos") dibujar(); else dibujarLateral();
     if (!activas) break;
   }
@@ -949,7 +973,7 @@ async function arrancar() {
   if (!E.estado) { $("#principal").innerHTML = '<div class="cargando-app">No se pudo conectar con la app. Ciérrala y vuelve a abrirla.</div>'; return; }
   if (!E.estado.modelos.some((m) => m.instalado)) E.vista = "modelos";
   dibujar();
-  if (E.estado.cuda_instalacion.activo || E.estado.modelos.some((m) => m.descarga)) sondearDescargas();
+  if (hayDescargasActivas()) sondearDescargas();
 
   api("/api/actualizacion").then((a) => {
     if (!a.hay) return;

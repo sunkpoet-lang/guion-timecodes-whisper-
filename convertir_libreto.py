@@ -559,8 +559,35 @@ def _texto_docx(doc):
     return "\n".join(lineas)
 
 
+def leer_xlsx(ruta: str):
+    """Lee la primera hoja de un Excel con columnas PERSONAJE y DIÁLOGO (y T.C. si la hay)."""
+    from openpyxl import load_workbook
+
+    libro = load_workbook(ruta, read_only=True, data_only=True)
+    for hoja in libro.worksheets:
+        filas_hoja = [["" if c is None else str(c) for c in f] for f in hoja.iter_rows(values_only=True)]
+        for n, encabezado in enumerate(filas_hoja[:3]):
+            columnas = _columnas_de_encabezado(encabezado)
+            if columnas:
+                break
+        else:
+            continue
+        tc, personaje, dialogo = columnas
+        filas = []
+        for f in filas_hoja[n + 1:]:
+            f = f + [""] * (max(c for c in columnas if c is not None) + 1 - len(f))
+            if not f[personaje].strip() and not f[dialogo].strip():
+                continue
+            filas.append({"timecode": f[tc].strip() if tc is not None else "", "personaje": f[personaje].strip(),
+                          "dialogo": re.sub(r"\s+", " ", f[dialogo]).strip(), "revisar": not f[personaje].strip()})
+        return filas
+    return []
+
+
 def leer_archivo(ruta: str):
-    """Convierte un .docx, .txt, .srt o .ass en (filas, formato)."""
+    """Convierte un .docx, .xlsx, .txt, .srt o .ass en (filas, formato)."""
+    if ruta.lower().endswith(".xlsx"):
+        return leer_xlsx(ruta), "tabla_excel"
     if ruta.lower().endswith(".docx"):
         doc = Document(ruta)
         filas = leer_tablas_docx(doc)
@@ -574,67 +601,79 @@ def leer_archivo(ruta: str):
         return detectar_y_parsear(f.read())
 
 
-def generar_xlsx_3_columnas(filas, ruta_salida: str, formato_tc: str = "completo"):
-    """Genera un Excel con las columnas T.C. | PERSONAJE | DIÁLOGO (sin columnas extra)."""
+def _columnas_salida(columna_original):
+    """Encabezados y claves de las columnas: T.C. | PERSONAJE | [ORIGINAL |] DIÁLOGO."""
+    if columna_original:
+        return ["T.C.", "PERSONAJE", "ORIGINAL", "DIÁLOGO"], ["timecode", "personaje", "original", "dialogo"]
+    return ["T.C.", "PERSONAJE", "DIÁLOGO"], ["timecode", "personaje", "dialogo"]
+
+
+def _valor_tc(fila, formato_tc):
+    timecode = fila.get("timecode", "")
+    return formatear_mmss(timecode) if formato_tc == "mmss" else timecode
+
+
+def generar_xlsx_3_columnas(filas, ruta_salida: str, formato_tc: str = "completo", columna_original=False):
+    """
+    Genera un Excel con las columnas T.C. | PERSONAJE | DIÁLOGO (sin columnas extra).
+    columna_original=True agrega ORIGINAL antes de DIÁLOGO (para revisar traducciones).
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
+    encabezados, claves = _columnas_salida(columna_original)
     libro = Workbook()
     hoja = libro.active
     hoja.title = "Guion"
-    hoja.append(["T.C.", "PERSONAJE", "DIÁLOGO"])
+    hoja.append(encabezados)
     for celda in hoja[1]:
         celda.font = Font(bold=True, color="FFFFFF")
         celda.fill = PatternFill("solid", fgColor="1F3A5F")
 
     for fila in filas:
-        timecode = fila.get("timecode", "")
-        hoja.append([formatear_mmss(timecode) if formato_tc == "mmss" else timecode,
-                     fila["personaje"], fila["dialogo"]])
+        hoja.append([_valor_tc(fila, formato_tc) if c == "timecode" else fila.get(c, "") for c in claves])
 
-    for (celda_tc, _, celda_dialogo) in hoja.iter_rows(min_row=2):
-        celda_tc.number_format = "@"  # texto: que Excel no convierta "0114" en 114
-        celda_dialogo.alignment = Alignment(wrap_text=True, vertical="top")
-    hoja.column_dimensions["A"].width = 14
-    hoja.column_dimensions["B"].width = 22
-    hoja.column_dimensions["C"].width = 90
+    for celdas in hoja.iter_rows(min_row=2):
+        celdas[0].number_format = "@"  # texto: que Excel no convierta "0114" en 114
+        for celda in celdas[2:]:
+            celda.alignment = Alignment(wrap_text=True, vertical="top")
+    anchos = [14, 22] + ([60, 60] if columna_original else [90])
+    for letra, ancho in zip("ABCD", anchos):
+        hoja.column_dimensions[letra].width = ancho
     hoja.freeze_panes = "A2"
     libro.save(ruta_salida)
 
 
-def generar_docx_3_columnas(filas, ruta_salida: str, formato_tc: str = "completo"):
+def generar_docx_3_columnas(filas, ruta_salida: str, formato_tc: str = "completo", columna_original=False):
     """
-    Genera un Word con tabla TIME CODE | PERSONAJE | DIÁLOGO.
+    Genera un Word con tabla T.C. | PERSONAJE | DIÁLOGO.
 
     formato_tc="completo" (default): TIME CODE tal cual viene (HH:MM:SS,mmm si
         es de un .srt/.ass, o vacío si es de un libreto tradicional).
     formato_tc="mmss": convierte el TIME CODE al formato corto de doblaje
         (MMSS, sin separadores ni milisegundos). Si viene vacío, se queda vacío.
+    columna_original=True agrega ORIGINAL antes de DIÁLOGO (para revisar traducciones).
     """
+    encabezados_texto, claves = _columnas_salida(columna_original)
     doc = Document()
     doc.add_heading("Guion (formato 3 columnas)", level=1)
 
-    tabla = doc.add_table(rows=1, cols=3)
+    tabla = doc.add_table(rows=1, cols=len(claves))
     tabla.style = "Table Grid"
-    encabezados = tabla.rows[0].cells
-    encabezados[0].text = "T.C."
-    encabezados[1].text = "PERSONAJE"
-    encabezados[2].text = "DIÁLOGO"
-    for celda in encabezados:
+    for celda, texto in zip(tabla.rows[0].cells, encabezados_texto):
+        celda.text = texto
         for p in celda.paragraphs:
             for run in p.runs:
                 run.bold = True
 
-    tabla.columns[0].width = Cm(3)
-    tabla.columns[1].width = Cm(3.5)
-    tabla.columns[2].width = Cm(10)
+    anchos = [Cm(3), Cm(3.5)] + ([Cm(6), Cm(6)] if columna_original else [Cm(10)])
+    for columna, ancho in zip(tabla.columns, anchos):
+        columna.width = ancho
 
     for fila in filas:
         celdas = tabla.add_row().cells
-        timecode = fila.get("timecode", "")
-        celdas[0].text = formatear_mmss(timecode) if formato_tc == "mmss" else timecode
-        celdas[1].text = fila["personaje"]
-        celdas[2].text = fila["dialogo"]
+        for celda, clave in zip(celdas, claves):
+            celda.text = _valor_tc(fila, formato_tc) if clave == "timecode" else fila.get(clave, "")
 
     doc.save(ruta_salida)
 
